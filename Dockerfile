@@ -1,17 +1,20 @@
-FROM rust:1.48 as planner
+ARG RUST_VERSION="1.48"
+ARG FPING_VERSION="5.0"
+
+FROM rust:${RUST_VERSION} as planner
 WORKDIR /app
 RUN cargo install cargo-chef
 RUN mkdir src && touch src/main.rs
 COPY ./Cargo.toml ./Cargo.lock ./
 RUN cargo chef prepare --recipe-path recipe.json
 
-FROM rust:1.48 as cacher
+FROM rust:${RUST_VERSION} as cacher
 WORKDIR /app
 RUN cargo install cargo-chef
 COPY --from=planner /app/recipe.json recipe.json
 RUN cargo chef cook --release --recipe-path recipe.json
 
-FROM rust:1.48 as builder
+FROM rust:${RUST_VERSION} as builder
 WORKDIR /app
 COPY --from=cacher /app/target target
 COPY --from=cacher $CARGO_HOME $CARGO_HOME
@@ -21,7 +24,8 @@ RUN cargo build --release --offline
 # Compile the latest version of fping
 FROM buildpack-deps:buster as fping_builder
 WORKDIR /usr/src/fping
-RUN curl https://fping.org/dist/fping-5.0.tar.gz | tar -xz --strip-components=1
+ARG FPING_VERSION
+RUN curl https://fping.org/dist/fping-${FPING_VERSION}.tar.gz | tar -xz --strip-components=1
 RUN ./configure && make && make install
 
 FROM debian:stable-slim
