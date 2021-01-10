@@ -26,7 +26,7 @@ fn parse_fping_version(raw: &str) -> Option<semver::Version> {
 }
 
 #[derive(Error, Debug)]
-pub enum VersionParseError {
+pub enum VersionError {
     #[error("could not extract version data from output:\n{0}")]
     UnknownFormat(String),
     #[error("fping was not found in FPING_BIN or PATH")]
@@ -37,29 +37,30 @@ pub enum VersionParseError {
     ProcessFailure(ExitStatus),
     #[error("unknown io failure")]
     Other(#[source] io::Error),
+    #[error("{0}")]
+    SpecificFailure(String),
 }
 
-impl From<io::Error> for VersionParseError {
+impl From<io::Error> for VersionError {
     fn from(e: io::Error) -> Self {
         match e.kind() {
-            io::ErrorKind::NotFound => VersionParseError::BinaryNotFound,
-            _ => VersionParseError::Other(e),
+            io::ErrorKind::NotFound => VersionError::BinaryNotFound,
+            _ => VersionError::Other(e),
         }
     }
 }
 
 pub(crate) fn output_to_version(
     output: io::Result<Output>,
-) -> Result<semver::Version, VersionParseError> {
+) -> Result<semver::Version, VersionError> {
     let output = output?;
     match output.status.code() {
         Some(0) => {
             let raw = std::str::from_utf8(&output.stdout).unwrap();
-            parse_fping_version(raw)
-                .ok_or_else(|| VersionParseError::UnknownFormat(raw.to_string()))
+            parse_fping_version(raw).ok_or_else(|| VersionError::UnknownFormat(raw.to_string()))
         }
-        Some(4) => Err(VersionParseError::DependenciesMissing),
-        _ => Err(VersionParseError::ProcessFailure(output.status)),
+        Some(4) => Err(VersionError::DependenciesMissing),
+        _ => Err(VersionError::ProcessFailure(output.status)),
     }
 }
 
