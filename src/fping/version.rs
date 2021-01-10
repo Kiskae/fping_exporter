@@ -2,6 +2,7 @@ use std::{
     io,
     process::{ExitStatus, Output},
 };
+use thiserror::Error;
 
 use regex::Regex;
 
@@ -24,14 +25,18 @@ fn parse_fping_version(raw: &str) -> Option<semver::Version> {
     ))
 }
 
-#[derive(Debug)]
-//TODO: use thiserror to generate useful error messages
+#[derive(Error, Debug)]
 pub enum VersionParseError {
+    #[error("could not extract version data from output:\n{0}")]
     UnknownFormat(String),
+    #[error("fping was not found in FPING_BIN or PATH")]
     BinaryNotFound,
+    #[error("libc failure, required file /etc/protocols missing")]
     DependenciesMissing,
+    #[error("unknown fping exit code: {:?}", .0.code())]
     ProcessFailure(ExitStatus),
-    Other(io::Error),
+    #[error("unknown io failure")]
+    Other(#[source] io::Error),
 }
 
 impl From<io::Error> for VersionParseError {
