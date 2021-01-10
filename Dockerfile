@@ -19,7 +19,7 @@ WORKDIR /app
 COPY --from=cacher /app/target target
 COPY --from=cacher $CARGO_HOME $CARGO_HOME
 COPY . .
-RUN cargo build --release --offline
+RUN cargo build --release --offline --features "docker"
 
 # Compile the latest version of fping
 FROM buildpack-deps:buster as fping_builder

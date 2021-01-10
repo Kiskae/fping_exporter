@@ -3,6 +3,9 @@ edition = "2018"
 name = "fping_exporter"
 version = "0.1.0-beta"
 
+[features]
+docker = []
+
 [dependencies]
 anyhow = "1"
 cfg-if = "1"
