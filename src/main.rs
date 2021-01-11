@@ -3,22 +3,21 @@ extern crate lazy_static;
 #[macro_use]
 extern crate clap;
 
-use std::env;
+use std::{convert::Infallible, env};
 
 use cfg_if::cfg_if;
+use semver::VersionReq;
 
 mod args;
 mod fping;
 
-cfg_if! {
-    if #[cfg(all(feature = "docker", unix))] {
-        // Docker signals container shutdown through SIGTERM
-        async fn terminate_signal() -> Option<()> {
+async fn terminate_signal() -> Option<()> {
+    cfg_if! {
+        if #[cfg(all(feature = "docker", unix))] {
+            // Docker signals container shutdown through SIGTERM
             use tokio::signal::unix::{signal, SignalKind};
             signal(SignalKind::terminate()).ok()?.recv().await
-        }
-    } else {
-        async fn terminate_signal() -> Option<()> {
+        } else {
             tokio::signal::ctrl_c().await.ok()
         }
     }
@@ -28,8 +27,34 @@ async fn fping_run() -> Option<()> {
     std::future::pending().await
 }
 
-async fn metrics_handler() -> Option<()> {
-    std::future::pending().await
+async fn metrics_handler(
+    args: &args::Args,
+    // registry, interrupt channel, perhaps combined?
+    // shutdown can perhaps be derived from args
+) -> Result<(), warp::Error> {
+    use warp::Filter;
+
+    let handler = || async {
+        //TODO: request summary update
+        //TODO: emit registry output
+        Ok::<_, Infallible>("well done!")
+    };
+
+    let metrics = warp::path(args.metrics_path.clone())
+        .and(warp::path::end())
+        .and_then(handler);
+
+    let (_, server) = warp::serve(metrics).try_bind_with_graceful_shutdown(args.metrics_addr, {
+        let timeout = args.execution_timeout;
+        async move {
+            match timeout {
+                Some(timeout) => tokio::time::sleep(timeout).await,
+                None => std::future::pending().await,
+            }
+        }
+    })?;
+
+    Ok(server.await)
 }
 
 #[tokio::main]
@@ -38,54 +63,30 @@ async fn main() -> anyhow::Result<()> {
     let launcher = fping::for_program(&fping_binary);
     let args = args::load_args(&launcher).await?;
     println!("{:?}", args);
+    if VersionReq::parse(">=4.3.0").expect("unexpected versionreq failure").matches(&args.fping_version) {
+        println!("supports signal summary");
+    }
     // change behavior based on args.fping_version
     //TODO: launch fping process
     //multiplex metrics/fping/cancellation
+
     tokio::select! {
         //TODO: terminate_signal => None -> failure to register handler
         Some(_) = terminate_signal() => {
             println!("received term")
+            //TODO: log terminate signal
         },
-        Some(_) = fping_run() => {
+        _ = fping_run() => {
             println!("fping exit")
         },
-        Some(_) = metrics_handler() => {
-            println!("metrics exit")
+        res = metrics_handler(&args) => {
+            res?;
+            println!("execution timeout")
+            //TODO: log execution timeout
         }
     }
+
+    // Clean up fping
+
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use std::time::Duration;
-
-    use tokio::{
-        task::JoinHandle,
-        time::{error::Elapsed, timeout},
-    };
-
-    use super::*;
-
-    async fn join_handle<H>(h: JoinHandle<H>) -> H {
-        match h.await {
-            Ok(x) => x,
-            Err(p) => match p.try_into_panic() {
-                Ok(reason) => std::panic::resume_unwind(reason),
-                Err(_) => panic!("future was cancelled"),
-            },
-        }
-    }
-
-    #[tokio::test]
-    #[cfg(feature = "docker")]
-    async fn test_signal_docker() -> Result<(), Elapsed> {
-        let h = tokio::spawn(terminate_signal());
-        //TODO: signal sigterm to self
-        assert_eq!(
-            timeout(Duration::from_secs(1), join_handle(h)).await?,
-            Some(())
-        );
-        Ok(())
-    }
 }

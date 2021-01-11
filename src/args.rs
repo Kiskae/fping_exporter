@@ -1,15 +1,13 @@
-use std::{
-    net::SocketAddr,
-    time::Duration,
-};
+use std::{net::SocketAddr, time::Duration};
 
 use crate::fping::{version::VersionError, Launcher};
 
 #[derive(Debug)]
 pub struct Args {
-    fping_version: semver::Version,
-    metrics_addr: SocketAddr,
-    metrics_path: String,
+    pub fping_version: semver::Version,
+    pub metrics_addr: SocketAddr,
+    pub metrics_path: String,
+    pub execution_timeout: Option<Duration>,
 }
 
 fn format_long_version(fping: Option<semver::Version>) -> String {
@@ -35,6 +33,7 @@ fn to_final_args(_args: clap::ArgMatches, fping_version: semver::Version) -> Arg
         fping_version,
         metrics_addr: ([0, 0, 0, 0], 9775).into(),
         metrics_path: "metrics".to_owned(),
+        execution_timeout: None,
     }
 }
 
