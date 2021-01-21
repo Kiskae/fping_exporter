@@ -1,7 +1,6 @@
 name: Build and Push docker images
 
-on:
-  workflow_dispatch: // For testing purposes..
+on: workflow_dispatch
 
 jobs:
   docker:
