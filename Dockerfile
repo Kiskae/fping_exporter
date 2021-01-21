@@ -1,25 +1,29 @@
 ARG RUST_VERSION="1.49"
 ARG FPING_VERSION="5.0"
 
-FROM rust:${RUST_VERSION} as planner
+# Download dependencies on native hardware, qemu and git don't play together
+FROM --platform=$BUILDPLATFORM rust:${RUST_VERSION} as vendor
 WORKDIR /app
-RUN cargo install cargo-chef
 RUN mkdir src && touch src/main.rs
 COPY ./Cargo.toml ./Cargo.lock ./
-RUN cargo chef prepare --recipe-path recipe.json
+RUN mkdir .cargo && cargo vendor > .cargo/config
 
+# Compile a dummy application to cache dependencies
 FROM rust:${RUST_VERSION} as cacher
 WORKDIR /app
-RUN cargo install cargo-chef
-COPY --from=planner /app/recipe.json recipe.json
-RUN cargo chef cook --release --recipe-path recipe.json
+RUN mkdir src && echo "fn main() {}" > src/main.rs
+COPY ./Cargo.toml ./Cargo.lock ./
+COPY --from=vendor /app/.cargo .cargo
+COPY --from=vendor /app/vendor vendor
+RUN cargo build --release --offline --verbose
 
 FROM rust:${RUST_VERSION} as builder
 WORKDIR /app
 COPY --from=cacher /app/target target
-COPY --from=cacher $CARGO_HOME $CARGO_HOME
+COPY --from=vendor /app/.cargo .cargo
+COPY --from=vendor /app/vendor vendor
 COPY . .
-RUN cargo build --release --offline --features "docker"
+RUN cargo build --release --offline --verbose --features "docker"
 
 # Compile the latest version of fping
 FROM buildpack-deps:buster as fping_builder
