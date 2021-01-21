@@ -33,8 +33,8 @@ pub enum VersionError {
     BinaryNotFound,
     #[error("libc failure, required file /etc/protocols missing")]
     DependenciesMissing,
-    #[error("unknown fping exit code: {:?}", .0.code())]
-    ProcessFailure(ExitStatus),
+    #[error("unknown fping exit code: {:?}\n{1}", .0.code())]
+    ProcessFailure(ExitStatus, String),
     #[error("unknown io failure")]
     Other(#[source] io::Error),
     #[error("{0}")]
@@ -60,7 +60,10 @@ pub(crate) fn output_to_version(
             parse_fping_version(raw).ok_or_else(|| VersionError::UnknownFormat(raw.to_string()))
         }
         Some(4) => Err(VersionError::DependenciesMissing),
-        _ => Err(VersionError::ProcessFailure(output.status)),
+        _ => Err(VersionError::ProcessFailure(
+            output.status,
+            String::from_utf8(output.stdout).unwrap(),
+        )),
     }
 }
 
@@ -92,6 +95,8 @@ mod tests {
         basic_template("/bin/fping");
         // nix derivation
         basic_template("/nix/store/s03vfmkr85irmca739szvnpfrps267pl-fping-5.0/bin/fping");
+        // relative call
+        basic_template("../fping/bin/fping");
 
         // No output -> failure to parse
         assert_eq!(parse_fping_version(""), None);
