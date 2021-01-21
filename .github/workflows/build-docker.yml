@@ -2,6 +2,9 @@ name: Build and Push docker images
 
 on:
   workflow_dispatch: // For testing purposes..
+  push:
+    branches:
+      - main
 
 jobs:
   docker:
