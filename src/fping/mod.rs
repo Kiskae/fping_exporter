@@ -8,7 +8,7 @@ pub struct Launcher<'t> {
     program: &'t str,
 }
 
-pub fn for_program<'t, S>(program: &'t S) -> Launcher<'t>
+pub fn for_program<S>(program: &S) -> Launcher
 where
     S: AsRef<str> + ?Sized,
 {

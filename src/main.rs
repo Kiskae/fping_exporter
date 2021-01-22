@@ -54,12 +54,13 @@ async fn metrics_handler(
         }
     })?;
 
-    Ok(server.await)
+    server.await;
+    Ok(())
 }
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let fping_binary = env::var("FPING_BIN").unwrap_or("fping".into());
+    let fping_binary = env::var("FPING_BIN").unwrap_or_else(|_| "fping".into());
     let launcher = fping::for_program(&fping_binary);
     let args = args::load_args(&launcher).await?;
     println!("{:#?}", args);
