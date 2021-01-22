@@ -2,7 +2,13 @@ name: Clippy Check
 
 on:
   pull_request:
+    paths:
+      - "src/**"
+      - "Cargo.lock"
   push:
+    paths:
+      - "src/**"
+      - "Cargo.lock"
 
 jobs:
   clippy:
