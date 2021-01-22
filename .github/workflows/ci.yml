@@ -17,7 +17,7 @@ jobs:
           profile: minimal
           toolchain: stable
           components: rustfmt
-      - name: Style Check
+      - name: cargo fmt
         uses: actions-rs/cargo@v1
         with:
           command: fmt
@@ -38,12 +38,19 @@ jobs:
           profile: minimal
           toolchain: ${{ matrix.rust || 'stable' }}
           override: true
-      - name: Build debug
+      - uses: actions/cache@v2
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}-debug
+      - name: cargo build
         uses: actions-rs/cargo@v1
         with:
           command: build
           args: ${{ matrix.features }}
-      - name: Test
+      - name: cargo test
         uses: actions-rs/cargo@v1
         with:
           command: test
@@ -75,7 +82,8 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}-${{ matrix.target }}
           restore-keys: |
             ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}-
-      - uses: actions-rs/cargo@v1
+      - name: cargo build --release
+        uses: actions-rs/cargo@v1
         with:
           use-cross: true
           command: build
@@ -86,7 +94,7 @@ jobs:
           path: target/${{ matrix.target }}/release/fping_exporter*
           if-no-files-found: error
   dockerize:
-    name: Release Build
+    name: Produce docker images
     needs: [build]
     runs-on: ubuntu-latest
     steps:
