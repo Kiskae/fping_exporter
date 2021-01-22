@@ -1,9 +1,10 @@
 name: Build and Push docker images
 
-on: 
+on:
+  workflow_dispatch:
   push:
-    branches:
-      - main
+    tags:
+      - "v*"
 
 jobs:
   docker:
