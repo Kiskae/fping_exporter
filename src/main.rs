@@ -62,8 +62,11 @@ async fn main() -> anyhow::Result<()> {
     let fping_binary = env::var("FPING_BIN").unwrap_or("fping".into());
     let launcher = fping::for_program(&fping_binary);
     let args = args::load_args(&launcher).await?;
-    println!("{:?}", args);
-    if VersionReq::parse(">=4.3.0").expect("unexpected versionreq failure").matches(&args.fping_version) {
+    println!("{:#?}", args);
+    if VersionReq::parse(">=4.3.0")
+        .expect("unexpected versionreq failure")
+        .matches(&args.fping_version)
+    {
         println!("supports signal summary");
     }
     // change behavior based on args.fping_version
