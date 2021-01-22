@@ -66,9 +66,22 @@ jobs:
           toolchain: stable
           target: ${{ matrix.target }}
           override: true
+      - uses: actions/cache@v2
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
       - uses: actions-rs/cargo@v1
         with:
           use-cross: true
           command: build
-          args: --release --target ${{ matrix.target }}
+          args: --release --verbose --features "docker" --target ${{ matrix.target }}
+      - uses: actions/upload-artifact@v2
+        with:
+          name: fping_exporter ${{ matrix.target }}
+          path: target/${{ matrix.target }}/release/fping_exporter*
+          if-no-files-found: error
+          
       #TODO: emit binaries to workflow
