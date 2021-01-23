@@ -16,6 +16,9 @@ pub enum ArgsError {
     MalformedBind(#[from] AddrParseError),
     #[error(transparent)]
     FpingProblem(#[from] VersionError),
+    #[error(transparent)]
+    #[cfg(test)]
+    TestError(#[from] clap::Error),
 }
 
 #[derive(Debug)]
@@ -101,4 +104,19 @@ pub async fn load_args(fping: &Launcher<'_>) -> Result<Args, ArgsError> {
             .get_matches(),
         version?,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse_cmd(args: Vec<&str>) -> Result<Args, ArgsError> {
+        let matches = clap_app().get_matches_from_safe(args)?;
+        convert_to_args(matches, semver::Version::new(1, 0, 0))
+    }
+
+    #[test]
+    fn basic_usage() {
+        parse_cmd(vec!["dns.google"]).unwrap();
+    }
 }
