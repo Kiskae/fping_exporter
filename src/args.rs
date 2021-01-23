@@ -1,16 +1,38 @@
-use std::{net::SocketAddr, time::Duration};
+use clap::Arg;
+use std::{
+    net::{AddrParseError, SocketAddr},
+    num::ParseIntError,
+    time::Duration,
+};
+use thiserror::Error;
 
 use crate::fping::{version::VersionError, Launcher};
+
+#[derive(Debug, Error)]
+pub enum ArgsError {
+    #[error("metrics-port is a not a valid port: {0}")]
+    PortNotANumber(#[from] ParseIntError),
+    #[error("metrics-bind is not a valid ip: {0}")]
+    MalformedBind(#[from] AddrParseError),
+    #[error(transparent)]
+    FpingProblem(#[from] VersionError),
+}
+
+#[derive(Debug)]
+pub struct MetricArgs {
+    pub addr: SocketAddr,
+    pub path: String,
+    pub runtime_limit: Option<Duration>,
+}
 
 #[derive(Debug)]
 pub struct Args {
     pub fping_version: semver::Version,
-    pub metrics_addr: SocketAddr,
-    pub metrics_path: String,
-    pub execution_timeout: Option<Duration>,
+    pub metrics: MetricArgs,
+    pub targets: Vec<String>,
 }
 
-fn format_long_version(fping: Option<semver::Version>) -> String {
+fn format_long_version(fping: Option<&semver::Version>) -> String {
     format!(
         "v{}\nfping: {}",
         crate_version!(),
@@ -18,30 +40,65 @@ fn format_long_version(fping: Option<semver::Version>) -> String {
     )
 }
 
-fn clap_app(long_version: &str) -> clap::App {
-    //TODO: ARGS
-    // metrics-path
-    // metrics-port
-    // metrics-bind
-    // TARGETS
-
-    app_from_crate!().long_version(long_version)
+fn clap_app() -> clap::App<'static, 'static> {
+    app_from_crate!()
+        .arg(
+            Arg::with_name("path")
+                .takes_value(true)
+                .long("metrics-path")
+                .default_value("metrics"),
+        )
+        .arg(
+            Arg::with_name("port")
+                .takes_value(true)
+                .long("metrics-port")
+                .default_value("9775"),
+        )
+        .arg(
+            Arg::with_name("bind")
+                .takes_value(true)
+                .long("metrics-bind")
+                .default_value("::"),
+        )
+        .arg(
+            Arg::with_name("TARGET")
+                .required(true)
+                .multiple(true)
+                .help("hostname or ip address to ping"),
+        )
 }
 
-fn to_final_args(_args: clap::ArgMatches, fping_version: semver::Version) -> Args {
-    Args {
+fn convert_to_args(
+    args: clap::ArgMatches,
+    fping_version: semver::Version,
+) -> Result<Args, ArgsError> {
+    //FIXME: target specification through files?
+    let targets = args
+        .values_of("TARGET")
+        .map_or_else(|| vec![], |iter| iter.map(|s| s.to_owned()).collect());
+
+    Ok(Args {
         fping_version,
-        metrics_addr: ([0, 0, 0, 0], 9775).into(),
-        metrics_path: "metrics".to_owned(),
-        execution_timeout: None,
-    }
+        metrics: MetricArgs {
+            addr: SocketAddr::new(
+                args.value_of("bind").unwrap().parse()?,
+                args.value_of("port").unwrap().parse()?,
+            ),
+            path: args.value_of("path").unwrap().to_owned(),
+            runtime_limit: None,
+        },
+        targets,
+    })
 }
 
 //TODO: create own error, validation of arguments in addition to VersionError
-pub async fn load_args(fping: &Launcher<'_>) -> Result<Args, VersionError> {
+pub async fn load_args(fping: &Launcher<'_>) -> Result<Args, ArgsError> {
     let version = fping.version(Duration::from_secs(1)).await;
-    Ok(to_final_args(
-        clap_app(format_long_version(version.as_ref().ok().cloned()).as_str()).get_matches(),
+
+    convert_to_args(
+        clap_app()
+            .long_version(format_long_version(version.as_ref().ok()).as_str())
+            .get_matches(),
         version?,
-    ))
+    )
 }

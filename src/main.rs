@@ -28,7 +28,7 @@ async fn fping_run() -> Option<()> {
 }
 
 async fn metrics_handler(
-    args: &args::Args,
+    args: &args::MetricArgs,
     // registry, interrupt channel, perhaps combined?
     // shutdown can perhaps be derived from args
 ) -> Result<(), warp::Error> {
@@ -40,12 +40,12 @@ async fn metrics_handler(
         Ok::<_, Infallible>("well done!")
     };
 
-    let metrics = warp::path(args.metrics_path.clone())
+    let metrics = warp::path(args.path.clone())
         .and(warp::path::end())
         .and_then(handler);
 
-    let (_, server) = warp::serve(metrics).try_bind_with_graceful_shutdown(args.metrics_addr, {
-        let timeout = args.execution_timeout;
+    let (_, server) = warp::serve(metrics).try_bind_with_graceful_shutdown(args.addr, {
+        let timeout = args.runtime_limit;
         async move {
             match timeout {
                 Some(timeout) => tokio::time::sleep(timeout).await,
@@ -64,8 +64,9 @@ async fn main() -> anyhow::Result<()> {
     let launcher = fping::for_program(&fping_binary);
     let args = args::load_args(&launcher).await?;
     println!("{:#?}", args);
+
     if VersionReq::parse(">=4.3.0")
-        .expect("unexpected versionreq failure")
+        .unwrap()
         .matches(&args.fping_version)
     {
         println!("supports signal summary");
@@ -73,6 +74,7 @@ async fn main() -> anyhow::Result<()> {
     // change behavior based on args.fping_version
     //TODO: launch fping process
     //multiplex metrics/fping/cancellation
+    let _fping = launcher.spawn().await;
 
     tokio::select! {
         //TODO: terminate_signal => None -> failure to register handler
@@ -83,7 +85,7 @@ async fn main() -> anyhow::Result<()> {
         _ = fping_run() => {
             println!("fping exit")
         },
-        res = metrics_handler(&args) => {
+        res = metrics_handler(&args.metrics) => {
             res?;
             println!("execution timeout")
             //TODO: log execution timeout

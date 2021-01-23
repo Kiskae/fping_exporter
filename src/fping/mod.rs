@@ -39,4 +39,9 @@ impl<'t> Launcher<'t> {
             .await?,
         )
     }
+
+    //TODO: return active process, allows hooking into event stream
+    pub async fn spawn(&self) {
+        unimplemented!()
+    }
 }
