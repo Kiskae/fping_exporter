@@ -1,15 +1,12 @@
 name: Build Docker Packages
 
 on:
+  workflow_dispatch:
   schedule:
-    # nightly
     - "0 4 * * *"
   push:
-    # releases/latest
     tags:
       - "v*"
-  # manual build
-  workflow_dispatch:
 
 jobs:
   build:
