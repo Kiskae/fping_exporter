@@ -110,7 +110,8 @@ pub async fn load_args(fping: &Launcher<'_>) -> Result<Args, ArgsError> {
 mod tests {
     use super::*;
 
-    fn parse_cmd(args: Vec<&str>) -> Result<Args, ArgsError> {
+    fn parse_cmd(mut args: Vec<&str>) -> Result<Args, ArgsError> {
+        args.insert(0, "program_path");
         let matches = clap_app().get_matches_from_safe(args)?;
         convert_to_args(matches, semver::Version::new(1, 0, 0))
     }
