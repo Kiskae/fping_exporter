@@ -5,7 +5,7 @@ extern crate log;
 #[macro_use]
 extern crate clap;
 
-use std::{convert::Infallible, env};
+use std::{convert::Infallible, env, time::Duration};
 
 use cfg_if::cfg_if;
 use semver::VersionReq;
@@ -44,17 +44,16 @@ async fn metrics_handler(
         .and_then(handler);
 
     let (_, server) = warp::serve(metrics).try_bind_with_graceful_shutdown(args.addr, {
+        info!(target: "metrics", "publishing metrics on http://{}/{}", args.addr, args.path);
+
         let timeout = args.runtime_limit;
         async move {
-            // TODO: this probably shouldnt be responsible, better handled at a higher level
             match timeout {
                 Some(timeout) => tokio::time::sleep(timeout).await,
                 None => std::future::pending().await,
             }
         }
     })?;
-
-    info!(target: "metrics", "publishing metrics on http://{}/{}", args.addr, args.path);
 
     server.await;
     Ok(())
@@ -66,13 +65,15 @@ async fn main() -> anyhow::Result<()> {
 
     let fping_binary = env::var("FPING_BIN").unwrap_or_else(|_| "fping".into());
     let launcher = fping::for_program(&fping_binary);
-    let args = args::load_args(&launcher).await?;
+    let args = args::load_args(launcher.version(Duration::from_millis(5000)).await)?;
 
     if VersionReq::parse(">=4.3.0")
         .unwrap()
         .matches(&args.fping_version)
     {
         info!("supports signal summary");
+    } else {
+        warn!("fping {} does not support summary requests, packet loss may be inaccurate", args.fping_version);
     }
 
     // change behavior based on args.fping_version

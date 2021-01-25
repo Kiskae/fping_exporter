@@ -6,7 +6,7 @@ use std::{
 };
 use thiserror::Error;
 
-use crate::fping::{version::VersionError, Launcher};
+use crate::fping::version::VersionError;
 
 #[derive(Debug, Error)]
 pub enum ArgsError {
@@ -16,6 +16,8 @@ pub enum ArgsError {
     MalformedBind(#[from] AddrParseError),
     #[error(transparent)]
     FpingProblem(#[from] VersionError),
+    #[error("runtime-limit is not valid duration: {0}")]
+    NotAValidTimeout(#[from] humantime::DurationError),
     #[error(transparent)]
     #[cfg(test)]
     TestError(#[from] clap::Error),
@@ -64,6 +66,11 @@ fn clap_app() -> clap::App<'static, 'static> {
                 .default_value("::"),
         )
         .arg(
+            Arg::with_name("timeout")
+                .takes_value(true)
+                .long("runtime-limit"),
+        )
+        .arg(
             Arg::with_name("TARGET")
                 .required(true)
                 .multiple(true)
@@ -80,6 +87,8 @@ fn convert_to_args(
         .values_of("TARGET")
         .map_or_else(Vec::new, |iter| iter.map(|s| s.to_owned()).collect());
 
+    let runtime_limit = args.value_of("timeout").map(humantime::parse_duration).transpose()?;
+
     Ok(Args {
         fping_version,
         metrics: MetricArgs {
@@ -88,16 +97,13 @@ fn convert_to_args(
                 args.value_of("port").unwrap().parse()?,
             ),
             path: args.value_of("path").unwrap().to_owned(),
-            runtime_limit: None,
+            runtime_limit,
         },
         targets,
     })
 }
 
-//TODO: create own error, validation of arguments in addition to VersionError
-pub async fn load_args(fping: &Launcher<'_>) -> Result<Args, ArgsError> {
-    let version = fping.version(Duration::from_secs(1)).await;
-
+pub fn load_args(version: Result<semver::Version, VersionError>) -> Result<Args, ArgsError> {
     convert_to_args(
         clap_app()
             .long_version(format_long_version(version.as_ref().ok()).as_str())

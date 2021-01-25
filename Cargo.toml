@@ -10,6 +10,7 @@ docker = []
 anyhow = "1"
 cfg-if = "1"
 clap = "2.33"
+humantime = "2.1"
 lazy_static = "1.4"
 log = {version = "0.4", features = ["release_max_level_info"]}
 pretty_env_logger = "0.4"
