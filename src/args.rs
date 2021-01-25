@@ -78,7 +78,7 @@ fn convert_to_args(
     //FIXME: target specification through files?
     let targets = args
         .values_of("TARGET")
-        .map_or_else(|| vec![], |iter| iter.map(|s| s.to_owned()).collect());
+        .map_or_else(Vec::new, |iter| iter.map(|s| s.to_owned()).collect());
 
     Ok(Args {
         fping_version,
