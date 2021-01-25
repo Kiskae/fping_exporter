@@ -9,6 +9,7 @@ use cfg_if::cfg_if;
 use semver::VersionReq;
 
 mod args;
+mod event_stream;
 mod fping;
 
 async fn terminate_signal() -> Option<()> {
@@ -21,10 +22,6 @@ async fn terminate_signal() -> Option<()> {
             tokio::signal::ctrl_c().await.ok()
         }
     }
-}
-
-async fn fping_run() -> Option<()> {
-    std::future::pending().await
 }
 
 async fn metrics_handler(
@@ -47,6 +44,7 @@ async fn metrics_handler(
     let (_, server) = warp::serve(metrics).try_bind_with_graceful_shutdown(args.addr, {
         let timeout = args.runtime_limit;
         async move {
+            // TODO: this probably shouldnt be responsible, better handled at a higher level
             match timeout {
                 Some(timeout) => tokio::time::sleep(timeout).await,
                 None => std::future::pending().await,
@@ -71,10 +69,9 @@ async fn main() -> anyhow::Result<()> {
     {
         println!("supports signal summary");
     }
+
     // change behavior based on args.fping_version
-    //TODO: launch fping process
-    //multiplex metrics/fping/cancellation
-    let _fping = launcher.spawn().await;
+    let mut fping = launcher.spawn(&args.targets).await?;
 
     tokio::select! {
         //TODO: terminate_signal => None -> failure to register handler
@@ -82,8 +79,9 @@ async fn main() -> anyhow::Result<()> {
             println!("received term")
             //TODO: log terminate signal
         },
-        _ = fping_run() => {
-            println!("fping exit")
+        res = fping.listen(|ev| println!("{:?}", ev)) => {
+            res?;
+            // Unexpected end, fall through and let clean up handle it
         },
         res = metrics_handler(&args.metrics) => {
             res?;
@@ -93,6 +91,14 @@ async fn main() -> anyhow::Result<()> {
     }
 
     // Clean up fping
+    let mut handle = fping.inner();
+    match handle.try_wait()? {
+        //TODO: try to diagnose based on status
+        //TODO: check for unhandled stderr output for reason?
+        Some(status) => println!("{:?}", status),
+        // Exit not caused by unexpected fping exit, clean up the child process
+        None => handle.kill().await?,
+    }
 
     Ok(())
 }
