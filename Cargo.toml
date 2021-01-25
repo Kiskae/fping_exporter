@@ -11,6 +11,8 @@ anyhow = "1"
 cfg-if = "1"
 clap = "2.33"
 lazy_static = "1.4"
+log = {version = "0.4", features = ["release_max_level_info"]}
+pretty_env_logger = "0.4"
 regex = "1"
 semver = "0.11"
 thiserror = "1"

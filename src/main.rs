@@ -1,6 +1,8 @@
 #[macro_use]
 extern crate lazy_static;
 #[macro_use]
+extern crate log;
+#[macro_use]
 extern crate clap;
 
 use std::{convert::Infallible, env};
@@ -52,22 +54,25 @@ async fn metrics_handler(
         }
     })?;
 
+    info!(target: "metrics", "publishing metrics on http://{}/{}", args.addr, args.path);
+
     server.await;
     Ok(())
 }
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    pretty_env_logger::init();
+
     let fping_binary = env::var("FPING_BIN").unwrap_or_else(|_| "fping".into());
     let launcher = fping::for_program(&fping_binary);
     let args = args::load_args(&launcher).await?;
-    println!("{:#?}", args);
 
     if VersionReq::parse(">=4.3.0")
         .unwrap()
         .matches(&args.fping_version)
     {
-        println!("supports signal summary");
+        info!("supports signal summary");
     }
 
     // change behavior based on args.fping_version
@@ -76,16 +81,16 @@ async fn main() -> anyhow::Result<()> {
     tokio::select! {
         //TODO: terminate_signal => None -> failure to register handler
         Some(_) = terminate_signal() => {
-            println!("received term")
+            info!("received term")
             //TODO: log terminate signal
         },
-        res = fping.listen(|ev| println!("{:?}", ev)) => {
+        res = fping.listen(|ev| trace!(target: "fping", "{:?}", ev)) => {
             res?;
             // Unexpected end, fall through and let clean up handle it
         },
         res = metrics_handler(&args.metrics) => {
             res?;
-            println!("execution timeout")
+            error!("execution timeout")
             //TODO: log execution timeout
         }
     }
@@ -95,8 +100,9 @@ async fn main() -> anyhow::Result<()> {
     match handle.try_wait()? {
         //TODO: try to diagnose based on status
         //TODO: check for unhandled stderr output for reason?
-        Some(status) => println!("{:?}", status),
+        Some(status) => error!("{:?}", status),
         // Exit not caused by unexpected fping exit, clean up the child process
+        //TODO: fping uses SIGINT as kill signal, .kill() defaults to SIGKILL
         None => handle.kill().await?,
     }
 

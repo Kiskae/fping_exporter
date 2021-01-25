@@ -32,5 +32,6 @@ RUN apt-get update && apt-get install -y netbase && rm -rf /var/lib/apt/lists/*
 COPY --from=selector /app/selected/fping_exporter /bin/
 COPY --from=fping_builder /usr/local/sbin/fping /bin/
 ENV FPING_BIN=/bin/fping
+ENV RUST_LOG=info
 ENV RUST_BACKTRACE=1
 ENTRYPOINT [ "/bin/fping_exporter" ]

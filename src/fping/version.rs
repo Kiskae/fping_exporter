@@ -54,6 +54,7 @@ pub(crate) fn output_to_version(
     output: io::Result<Output>,
 ) -> Result<semver::Version, VersionError> {
     let output = output?;
+    trace!(target: "fping", "version: {:?}", output);
     match output.status.code() {
         Some(0) => {
             let raw = std::str::from_utf8(&output.stdout).unwrap();
