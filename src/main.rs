@@ -15,15 +15,15 @@ mod fping;
 
 #[cfg(all(feature = "docker", unix))]
 async fn terminate_signal() -> Option<()> {
-            // Docker signals container shutdown through SIGTERM
-            use tokio::signal::unix::{signal, SignalKind};
-            signal(SignalKind::terminate()).ok()?.recv().await
+    // Docker signals container shutdown through SIGTERM
+    use tokio::signal::unix::{signal, SignalKind};
+    signal(SignalKind::terminate()).ok()?.recv().await
 }
 
 #[cfg(not(all(feature = "docker", unix)))]
 async fn terminate_signal() -> Option<()> {
-            tokio::signal::ctrl_c().await.ok()
-        }
+    tokio::signal::ctrl_c().await.ok()
+}
 
 async fn metrics_handler(
     args: &args::MetricArgs,
@@ -70,6 +70,24 @@ fn discovery_timeout() -> Duration {
     Duration::from_millis(50)
 }
 
+fn test_convert<T>(
+    mut handler: impl FnMut(
+        event_stream::Event<Result<&fping::Ping, &str>, Result<&fping::Control, &str>, T>,
+    ),
+) -> impl FnMut(event_stream::Event<&str, &str, T>) {
+    use event_stream::Event;
+    move |ev| match ev {
+        Event::Output(x) => handler(Event::Output(fping::Ping::parse(x).as_ref().ok_or(x))),
+        Event::Error(x) => handler(Event::Error(fping::Control::parse(x).as_ref().ok_or(x))),
+        Event::Control(x) => handler(Event::Control(x)),
+    }
+}
+
+fn handler<T: std::fmt::Debug>(
+) -> impl FnMut(event_stream::Event<Result<&fping::Ping, &str>, Result<&fping::Control, &str>, T>) {
+    |ev| trace!(target: "ev", "{:?}", ev)
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     pretty_env_logger::init();
@@ -98,7 +116,7 @@ async fn main() -> anyhow::Result<()> {
             info!("received term")
             //TODO: log terminate signal
         },
-        res = fping.listen(|ev| trace!(target: "fping", "{:?}", ev)) => {
+        res = fping.listen(test_convert(handler())) => {
             res?;
             // Unexpected end, fall through and let clean up handle it
         },

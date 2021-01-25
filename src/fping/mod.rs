@@ -7,7 +7,10 @@ use tokio::{
 
 use crate::event_stream::{EventStreamSource, PendingStream};
 
+mod protocol;
 pub mod version;
+
+pub use protocol::{Control, Ping};
 
 pub struct Launcher<'t> {
     program: &'t str,
