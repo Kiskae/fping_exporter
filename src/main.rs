@@ -7,24 +7,23 @@ extern crate clap;
 
 use std::{convert::Infallible, env, time::Duration};
 
-use cfg_if::cfg_if;
 use semver::VersionReq;
 
 mod args;
 mod event_stream;
 mod fping;
 
+#[cfg(all(feature = "docker", unix))]
 async fn terminate_signal() -> Option<()> {
-    cfg_if! {
-        if #[cfg(all(feature = "docker", unix))] {
             // Docker signals container shutdown through SIGTERM
             use tokio::signal::unix::{signal, SignalKind};
             signal(SignalKind::terminate()).ok()?.recv().await
-        } else {
+}
+
+#[cfg(not(all(feature = "docker", unix)))]
+async fn terminate_signal() -> Option<()> {
             tokio::signal::ctrl_c().await.ok()
         }
-    }
-}
 
 async fn metrics_handler(
     args: &args::MetricArgs,
@@ -59,13 +58,24 @@ async fn metrics_handler(
     Ok(())
 }
 
+#[cfg(debug_assertions)]
+fn discovery_timeout() -> Duration {
+    humantime::parse_duration(option_env!("DEV_PROGRAM_TIMEOUT").unwrap_or("50ms"))
+        .expect("invalid program timeout provided")
+}
+
+#[cfg(not(debug_assertions))]
+fn discovery_timeout() -> Duration {
+    // 50ms to execute a static binary should be plenty...
+    Duration::from_millis(50)
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     pretty_env_logger::init();
-
     let fping_binary = env::var("FPING_BIN").unwrap_or_else(|_| "fping".into());
     let launcher = fping::for_program(&fping_binary);
-    let args = args::load_args(launcher.version(Duration::from_millis(5000)).await)?;
+    let args = args::load_args(launcher.version(discovery_timeout()).await)?;
 
     if VersionReq::parse(">=4.3.0")
         .unwrap()
@@ -73,7 +83,10 @@ async fn main() -> anyhow::Result<()> {
     {
         info!("supports signal summary");
     } else {
-        warn!("fping {} does not support summary requests, packet loss may be inaccurate", args.fping_version);
+        warn!(
+            "fping {} does not support summary requests, packet loss may be inaccurate",
+            args.fping_version
+        );
     }
 
     // change behavior based on args.fping_version

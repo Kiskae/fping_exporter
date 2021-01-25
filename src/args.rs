@@ -87,7 +87,10 @@ fn convert_to_args(
         .values_of("TARGET")
         .map_or_else(Vec::new, |iter| iter.map(|s| s.to_owned()).collect());
 
-    let runtime_limit = args.value_of("timeout").map(humantime::parse_duration).transpose()?;
+    let runtime_limit = args
+        .value_of("timeout")
+        .map(humantime::parse_duration)
+        .transpose()?;
 
     Ok(Args {
         fping_version,
