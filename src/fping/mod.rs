@@ -1,6 +1,11 @@
-use std::time::Duration;
+use std::{ffi::OsStr, io, process::Stdio, time::Duration};
 
-use tokio::{process::Command, time::error::Elapsed};
+use tokio::{
+    process::{Child, Command},
+    time::error::Elapsed,
+};
+
+use crate::event_stream::{EventStreamSource, PendingStream};
 
 pub mod version;
 
@@ -40,8 +45,14 @@ impl<'t> Launcher<'t> {
         )
     }
 
-    //TODO: return active process, allows hooking into event stream
-    pub async fn spawn(&self) {
-        unimplemented!()
+    pub async fn spawn<S: AsRef<OsStr>>(&self, targets: &[S]) -> io::Result<PendingStream<Child>> {
+        Command::new(self.program)
+            .arg("-ADln")
+            .args(targets)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()?
+            .as_eventstream()
     }
 }
