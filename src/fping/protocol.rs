@@ -135,7 +135,7 @@ impl<'t> Control<'t> {
             .or_else(wrap_option(|x: &str| {
                 if x.is_empty() {
                     Some(Control::StatusBegin)
-                } else if x.starts_with("[") && x.ends_with("]") {
+                } else if x.starts_with('[') && x.ends_with(']') {
                     Some(Control::RandomLocalTime)
                 } else {
                     None
