@@ -70,22 +70,63 @@ fn discovery_timeout() -> Duration {
     Duration::from_millis(50)
 }
 
-fn test_convert<T>(
-    mut handler: impl FnMut(
-        event_stream::Event<Result<&fping::Ping, &str>, Result<&fping::Control, &str>, T>,
-    ),
-) -> impl FnMut(event_stream::Event<&str, &str, T>) {
-    use event_stream::Event;
-    move |ev| match ev {
-        Event::Output(x) => handler(Event::Output(fping::Ping::parse(x).as_ref().ok_or(x))),
-        Event::Error(x) => handler(Event::Error(fping::Control::parse(x).as_ref().ok_or(x))),
-        Event::Control(x) => handler(Event::Control(x)),
+struct TestType;
+
+impl event_stream::EventHandler for TestType {
+    type Handle = tokio::process::Child;
+    type Token = event_stream::ControlDisabled;
+
+    fn on_output(&mut self, line: String) {
+        trace!(target: "ev", "{:?}", fping::Ping::parse(&line))
+    }
+
+    fn on_error(&mut self, line: String) {
+        trace!(target: "ev", "{:?}", fping::Control::parse(&line))
+    }
+
+    fn on_control(&mut self, _: &mut Self::Handle, token: Self::Token) {
+        //TODO:
+        trace!(target: "ev", "{:?}", token)
     }
 }
 
-fn handler<T: std::fmt::Debug>(
-) -> impl FnMut(event_stream::Event<Result<&fping::Ping, &str>, Result<&fping::Control, &str>, T>) {
-    |ev| trace!(target: "ev", "{:?}", ev)
+#[allow(dead_code)]
+struct ExclusiveClaim<T> {
+    value: T,
+    guard: tokio::sync::OwnedMutexGuard<()>,
+}
+
+struct LockControl<H> {
+    handler: H,
+    lock: std::sync::Arc<tokio::sync::Mutex<()>>,
+}
+
+impl<H, T> event_stream::EventHandler for LockControl<H>
+where
+    H: event_stream::EventHandler<Token = ExclusiveClaim<T>>,
+{
+    type Handle = H::Handle;
+    type Token = T;
+
+    fn on_output(&mut self, line: String) {
+        self.handler.on_output(line)
+    }
+
+    fn on_error(&mut self, line: String) {
+        self.handler.on_error(line)
+    }
+
+    fn on_control(&mut self, handle: &mut Self::Handle, token: Self::Token) {
+        if let Ok(claim) = self.lock.clone().try_lock_owned() {
+            self.handler.on_control(
+                handle,
+                ExclusiveClaim {
+                    value: token,
+                    guard: claim,
+                },
+            )
+        }
+    }
 }
 
 #[tokio::main]
@@ -108,7 +149,7 @@ async fn main() -> anyhow::Result<()> {
     }
 
     // change behavior based on args.fping_version
-    let mut fping = launcher.spawn(&args.targets).await?;
+    let mut fping = launcher.spawn(&args.targets).await?.with_controls(None);
 
     tokio::select! {
         //TODO: terminate_signal => None -> failure to register handler
@@ -116,7 +157,7 @@ async fn main() -> anyhow::Result<()> {
             info!("received term")
             //TODO: log terminate signal
         },
-        res = fping.listen(test_convert(handler())) => {
+        res = fping.listen(TestType) => {
             res?;
             // Unexpected end, fall through and let clean up handle it
         },
@@ -128,7 +169,7 @@ async fn main() -> anyhow::Result<()> {
     }
 
     // Clean up fping
-    let mut handle = fping.inner();
+    let mut handle = fping.dispose();
     match handle.try_wait()? {
         //TODO: try to diagnose based on status
         //TODO: check for unhandled stderr output for reason?

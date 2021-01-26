@@ -6,18 +6,25 @@ use tokio::{
     sync::mpsc,
 };
 
-#[derive(Debug)]
-pub enum Event<O, E, C> {
-    Output(O),
-    Error(E),
-    Control(C),
+pub trait EventHandler {
+    type Handle: ?Sized;
+    type Token;
+
+    fn on_output(&mut self, line: String);
+
+    fn on_error(&mut self, line: String);
+
+    fn on_control(&mut self, handle: &mut Self::Handle, token: Self::Token);
 }
 
-pub struct PendingStream<ES: EventStreamSource + ?Sized> {
+#[derive(Debug)]
+pub enum ControlDisabled {}
+
+pub struct PendingStream<ES: EventStreamSource + ?Sized, T = ControlDisabled> {
     handle: ES::Handle,
     stdout: Option<Lines<BufReader<ES::Stdout>>>,
     stderr: Option<Lines<BufReader<ES::Stderr>>>,
-    interrupts: Option<mpsc::Receiver<()>>,
+    control: Option<mpsc::Receiver<T>>,
 }
 
 impl<ES: EventStreamSource> PendingStream<ES> {
@@ -31,19 +38,28 @@ impl<ES: EventStreamSource> PendingStream<ES> {
             handle,
             stdout: stdout.map(BufReader::new).map(AsyncBufReadExt::lines),
             stderr: stderr.map(BufReader::new).map(AsyncBufReadExt::lines),
-            interrupts: None,
+            control: None,
         }
     }
 
-    pub fn inner(self) -> ES::Handle {
-        self.handle
+    pub fn with_controls<T>(self, control: Option<mpsc::Receiver<T>>) -> PendingStream<ES, T> {
+        PendingStream {
+            handle: self.handle,
+            stdout: self.stdout,
+            stderr: self.stderr,
+            control,
+        }
     }
 }
 
-impl<ES: EventStreamSource> PendingStream<ES> {
+impl<ES: EventStreamSource, T> PendingStream<ES, T> {
+    pub fn dispose(self) -> ES::Handle {
+        self.handle
+    }
+
     pub async fn listen(
         &mut self,
-        mut handler: impl FnMut(Event<&str, &str, ()>),
+        mut handler: impl EventHandler<Handle = ES::Handle, Token = T>,
     ) -> io::Result<()> {
         async fn optional_call<T, F, O>(opt: Option<T>, async_fn: impl FnOnce(T) -> F) -> Option<O>
         where
@@ -63,18 +79,15 @@ impl<ES: EventStreamSource> PendingStream<ES> {
         }
 
         loop {
-            //TODO: inline transform
-            //TODO: control structure
             tokio::select! {
-                Some(_) = optional_call(self.interrupts.as_mut(), mpsc::Receiver::recv) => {
-                    //TODO: delegate behavior to stateful typevar
-                    handler(Event::Control(()))
+                Some(token) = optional_call(self.control.as_mut(), mpsc::Receiver::recv) => {
+                    handler.on_control(&mut self.handle, token);
                 }
                 Some(out) = optional_call(self.stdout.as_mut(), get_line) => {
-                    handler(Event::Output(&out?))
+                    handler.on_output(out?);
                 }
                 Some(err) = optional_call(self.stderr.as_mut(), get_line) => {
-                    handler(Event::Error(&err?))
+                    handler.on_error(err?);
                 }
                 else => {
                     break;

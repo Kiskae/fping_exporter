@@ -123,7 +123,7 @@ impl<'t> Control<'t> {
         })
     }
 
-    pub fn parse(raw: &'t str) -> Option<Control> {
+    pub fn parse(raw: &str) -> Option<Control> {
         #[inline]
         fn wrap_option<T, E: Copy>(
             try_fn: impl FnOnce(E) -> Option<T>,
