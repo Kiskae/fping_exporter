@@ -10,7 +10,7 @@ extern crate log;
 #[macro_use]
 extern crate clap;
 
-use std::{convert::Infallible, env, io, time::Duration};
+use std::{collections::HashMap, convert::Infallible, env, io, time::Duration};
 
 use semver::VersionReq;
 
@@ -75,68 +75,81 @@ fn discovery_timeout() -> Duration {
     Duration::from_millis(50)
 }
 
-struct TestType;
-
-impl<H, T: std::fmt::Debug> event_stream::EventHandler<String, String, H, T> for TestType {
-    fn on_output(&mut self, event: String) {
-        trace!(target: "ev", "{:?}", fping::Ping::parse(&event))
-    }
-
-    fn on_error(&mut self, event: String) {
-        trace!(target: "ev", "{:?}", fping::Control::parse(&event))
-    }
-
-    fn on_control(&mut self, _: &mut H, token: T) -> io::Result<()> {
-        trace!(target: "ev", "{:?}", token);
-        Ok(())
-    }
-}
-
-#[allow(dead_code)]
 #[derive(Debug)]
-struct ExclusiveClaim<T> {
-    value: T,
-    guard: tokio::sync::OwnedMutexGuard<()>,
+struct MetricsState<T> {
+    last_result: HashMap<String, f64>,
+    expected_targets: u32,
+    current_targets: u32,
+    held_token: Option<T>,
 }
 
-struct LockControl<H> {
-    handler: H,
-    lock: std::sync::Arc<tokio::sync::Mutex<()>>,
-                    }
-
-impl<H> LockControl<H> {
-    fn wrap(handler: H) -> Self {
+impl<T> MetricsState<T> {
+    fn new() -> Self {
         Self {
-            handler,
-            lock: std::sync::Arc::new(tokio::sync::Mutex::new(())),
+            last_result: HashMap::default(),
+            expected_targets: 1,
+            current_targets: 0,
+            held_token: None,
         }
     }
 }
 
-impl<F, O, E, H, T> event_stream::EventHandler<O, E, H, T> for LockControl<F>
-where
-    F: event_stream::EventHandler<O, E, H, ExclusiveClaim<T>>,
+impl<O: AsRef<str>, E: AsRef<str>, H, T: std::fmt::Debug> event_stream::EventHandler<O, E, H, T>
+    for MetricsState<T>
 {
     fn on_output(&mut self, event: O) {
-        self.handler.on_output(event)
+        if let Some(ping) = fping::Ping::parse(&event) {
+            let _delta = if let Some(rtt) = ping.result {
+                let one_way_delay = rtt.div_f64(2.0).as_secs_f64();
+                match self.last_result.get_mut(ping.target) {
+                    Some(prev) => {
+                        let delta = (*prev - one_way_delay).abs();
+                        *prev = one_way_delay;
+                        Some(delta)
+                    }
+                    None => {
+                        self.last_result
+                            .insert(ping.target.to_owned(), one_way_delay);
+                        None
+                    }
+                }
+            } else {
+                None
+            };
+            //TODO: record ping
+            //TODO: record delta
+        }
     }
 
     fn on_error(&mut self, event: E) {
-        self.handler.on_error(event)
+        use fping::Control;
+        match Control::parse(&event) {
+            Control::TargetSummary {
+                target: _,
+                addr: _,
+                sent: _,
+                received: _,
+            } => {
+                //TODO: record sent/received
+                self.current_targets = self.current_targets + 1;
+                if self.current_targets >= self.expected_targets {
+                    //TODO: resolve held_token
+                    self.held_token = None;
+                }
+            }
+            Control::RandomLocalTime => {
+                // Reset expected targets
+                self.expected_targets = std::cmp::max(self.expected_targets, self.current_targets);
+                self.current_targets = 0;
+            }
+            e => trace!("Unhandled: {:?}", e),
+        }
     }
 
-    fn on_control(&mut self, handle: &mut H, token: T) -> io::Result<()> {
-        if let Ok(claim) = self.lock.clone().try_lock_owned() {
-            self.handler.on_control(
-                handle,
-                ExclusiveClaim {
-                    value: token,
-                    guard: claim,
-                },
-            )
-        } else {
-            Ok(())
-        }
+    fn on_control(&mut self, _: &mut H, token: T) -> io::Result<()> {
+        debug_assert!(self.held_token.is_none());
+        self.held_token = Some(token);
+        Ok(())
     }
 }
 
@@ -147,20 +160,25 @@ async fn main() -> anyhow::Result<()> {
     let launcher = fping::for_program(&fping_binary);
     let args = args::load_args(&launcher, discovery_timeout()).await?;
 
-    if VersionReq::parse(">=4.3.0")
+    let _ = if VersionReq::parse(">=4.3.0")
         .unwrap()
         .matches(&args.fping_version)
     {
         info!("supports signal summary");
+        1
     } else {
         warn!(
             "fping {} does not support summary requests, packet loss may be inaccurate",
             args.fping_version
         );
-    }
+        0
+    };
 
     // change behavior based on args.fping_version
-    let mut fping = launcher.spawn(&args.targets).await?; //.with_controls(None);
+    let mut fping = launcher
+        .spawn(&args.targets)
+        .await?
+        .with_controls::<u32>(None);
 
     tokio::select! {
         //TODO: terminate_signal => None -> failure to register handler
@@ -168,7 +186,7 @@ async fn main() -> anyhow::Result<()> {
             info!("received term")
             //TODO: log terminate signal
         },
-        res = fping.listen(LockControl::wrap(TestType)) => {
+        res = fping.listen(MetricsState::new()) => {
             res?;
             // Unexpected end, fall through and let clean up handle it
         },
