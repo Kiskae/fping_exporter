@@ -5,7 +5,7 @@ extern crate log;
 #[macro_use]
 extern crate clap;
 
-use std::{convert::Infallible, env, time::Duration};
+use std::{convert::Infallible, env, io, time::Duration};
 
 use semver::VersionReq;
 
@@ -72,25 +72,23 @@ fn discovery_timeout() -> Duration {
 
 struct TestType;
 
-impl event_stream::EventHandler for TestType {
-    type Handle = tokio::process::Child;
-    type Token = event_stream::ControlDisabled;
-
-    fn on_output(&mut self, line: String) {
-        trace!(target: "ev", "{:?}", fping::Ping::parse(&line))
+impl<H, T: std::fmt::Debug> event_stream::EventHandler<String, String, H, T> for TestType {
+    fn on_output(&mut self, event: String) {
+        trace!(target: "ev", "{:?}", fping::Ping::parse(&event))
     }
 
-    fn on_error(&mut self, line: String) {
-        trace!(target: "ev", "{:?}", fping::Control::parse(&line))
+    fn on_error(&mut self, event: String) {
+        trace!(target: "ev", "{:?}", fping::Control::parse(&event))
     }
 
-    fn on_control(&mut self, _: &mut Self::Handle, token: Self::Token) {
-        //TODO:
-        trace!(target: "ev", "{:?}", token)
+    fn on_control(&mut self, _: &mut H, token: T) -> io::Result<()> {
+        trace!(target: "ev", "{:?}", token);
+        Ok(())
     }
 }
 
 #[allow(dead_code)]
+#[derive(Debug)]
 struct ExclusiveClaim<T> {
     value: T,
     guard: tokio::sync::OwnedMutexGuard<()>,
@@ -101,22 +99,28 @@ struct LockControl<H> {
     lock: std::sync::Arc<tokio::sync::Mutex<()>>,
 }
 
-impl<H, T> event_stream::EventHandler for LockControl<H>
+impl<H> LockControl<H> {
+    fn wrap(handler: H) -> Self {
+        Self {
+            handler,
+            lock: std::sync::Arc::new(tokio::sync::Mutex::new(())),
+        }
+    }
+}
+
+impl<F, O, E, H, T> event_stream::EventHandler<O, E, H, T> for LockControl<F>
 where
-    H: event_stream::EventHandler<Token = ExclusiveClaim<T>>,
+    F: event_stream::EventHandler<O, E, H, ExclusiveClaim<T>>,
 {
-    type Handle = H::Handle;
-    type Token = T;
-
-    fn on_output(&mut self, line: String) {
-        self.handler.on_output(line)
+    fn on_output(&mut self, event: O) {
+        self.handler.on_output(event)
     }
 
-    fn on_error(&mut self, line: String) {
-        self.handler.on_error(line)
+    fn on_error(&mut self, event: E) {
+        self.handler.on_error(event)
     }
 
-    fn on_control(&mut self, handle: &mut Self::Handle, token: Self::Token) {
+    fn on_control(&mut self, handle: &mut H, token: T) -> io::Result<()> {
         if let Ok(claim) = self.lock.clone().try_lock_owned() {
             self.handler.on_control(
                 handle,
@@ -125,6 +129,8 @@ where
                     guard: claim,
                 },
             )
+        } else {
+            Ok(())
         }
     }
 }
@@ -149,7 +155,7 @@ async fn main() -> anyhow::Result<()> {
     }
 
     // change behavior based on args.fping_version
-    let mut fping = launcher.spawn(&args.targets).await?.with_controls(None);
+    let mut fping = launcher.spawn(&args.targets).await?; //.with_controls(None);
 
     tokio::select! {
         //TODO: terminate_signal => None -> failure to register handler
@@ -157,7 +163,7 @@ async fn main() -> anyhow::Result<()> {
             info!("received term")
             //TODO: log terminate signal
         },
-        res = fping.listen(TestType) => {
+        res = fping.listen(LockControl::wrap(TestType)) => {
             res?;
             // Unexpected end, fall through and let clean up handle it
         },

@@ -6,15 +6,12 @@ use tokio::{
     sync::mpsc,
 };
 
-pub trait EventHandler {
-    type Handle: ?Sized;
-    type Token;
+pub trait EventHandler<Out, Err, Handle: ?Sized, Token> {
+    fn on_output(&mut self, event: Out);
 
-    fn on_output(&mut self, line: String);
+    fn on_error(&mut self, event: Err);
 
-    fn on_error(&mut self, line: String);
-
-    fn on_control(&mut self, handle: &mut Self::Handle, token: Self::Token);
+    fn on_control(&mut self, handle: &mut Handle, token: Token) -> io::Result<()>;
 }
 
 #[derive(Debug)]
@@ -59,7 +56,7 @@ impl<ES: EventStreamSource, T> PendingStream<ES, T> {
 
     pub async fn listen(
         &mut self,
-        mut handler: impl EventHandler<Handle = ES::Handle, Token = T>,
+        mut handler: impl EventHandler<String, String, ES::Handle, T>,
     ) -> io::Result<()> {
         async fn optional_call<T, F, O>(opt: Option<T>, async_fn: impl FnOnce(T) -> F) -> Option<O>
         where
@@ -81,7 +78,7 @@ impl<ES: EventStreamSource, T> PendingStream<ES, T> {
         loop {
             tokio::select! {
                 Some(token) = optional_call(self.control.as_mut(), mpsc::Receiver::recv) => {
-                    handler.on_control(&mut self.handle, token);
+                    handler.on_control(&mut self.handle, token)?;
                 }
                 Some(out) = optional_call(self.stdout.as_mut(), get_line) => {
                     handler.on_output(out?);
