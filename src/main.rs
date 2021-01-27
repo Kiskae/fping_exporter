@@ -1,4 +1,7 @@
+// fping itself only runs on unix
 #![cfg(unix)]
+// FIXME: remove once testing has been fully covered
+#![cfg_attr(test, allow(dead_code))]
 
 #[macro_use]
 extern crate lazy_static;

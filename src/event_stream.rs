@@ -116,8 +116,7 @@ impl EventStreamSource for Child {
     }
 }
 
-//Temporary allow, used for testing
-#[allow(dead_code)]
+#[cfg(test)]
 mod synthetic {
     use std::io;
 
@@ -160,4 +159,5 @@ mod synthetic {
     }
 }
 
+#[cfg(test)]
 pub use synthetic::{as_stderr, as_stdout};
