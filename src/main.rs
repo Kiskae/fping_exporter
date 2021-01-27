@@ -117,6 +117,8 @@ impl<O: AsRef<str>, E: AsRef<str>, H, T: std::fmt::Debug> event_stream::EventHan
                 None
             };
             //TODO: record ping
+            debug!("rtt {:?} on [{},{}]", ping.result, ping.target, ping.addr);
+            debug!("ipvd {:?} on [{},{}]", _delta, ping.target, ping.addr);
             //TODO: record delta
         }
     }
@@ -125,11 +127,12 @@ impl<O: AsRef<str>, E: AsRef<str>, H, T: std::fmt::Debug> event_stream::EventHan
         use fping::Control;
         match Control::parse(&event) {
             Control::TargetSummary {
-                target: _,
-                addr: _,
-                sent: _,
-                received: _,
+                target,
+                addr,
+                sent,
+                received,
             } => {
+                debug!("packet loss ({}/{}) on [{},{}]", received, sent, target, addr);
                 //TODO: record sent/received
                 self.current_targets = self.current_targets + 1;
                 if self.current_targets >= self.expected_targets {
