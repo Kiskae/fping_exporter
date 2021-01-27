@@ -146,3 +146,76 @@ impl<'t> Control<&'t str> {
             .ok()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse_lines<S, O>(lines: impl IntoIterator<Item = S>, parse: impl Fn(S) -> O) -> Vec<O> {
+        lines.into_iter().map(parse).collect()
+    }
+
+    #[test]
+    fn parse_response() {
+        assert_eq!(
+            Ping::parse("[1611765997.71135] localhost (127.0.0.1) : [9], 64 bytes, 0.029 ms (0.040 avg, 0% loss)"),
+            Some(Ping {
+                timestamp: Duration::from_secs_f64("1611765997.71135".parse().unwrap()),
+                target: "localhost",
+                addr: "127.0.0.1",
+                seq: 9,
+                result: Some(Duration::from_micros(29)),
+            })
+        );
+
+        //assert!(Ping::parse("raw").is_some());
+    }
+
+    #[test]
+    fn parse_signal_summary() {
+        assert_eq!(parse_lines(
+            "\n\
+            [16:55:13]\n\
+            dns.google (8.8.4.4) : xmt/rcv/%loss = 104/104/0%, min/avg/max = 10.5/18.6/77.9\n\
+            localhost (127.0.0.1) : xmt/rcv/%loss = 104/104/0%, min/avg/max = 0.025/0.063/0.189\n\
+            8.8.8.7 (8.8.8.7) : xmt/rcv/%loss = 0/0/0%\n\
+            ipv6.google.com (2a00:1450:400e:806::200e) : xmt/rcv/%loss = 104/0/100%\n\
+            ns1.webtraf.com.au (103.224.162.40) : xmt/rcv/%loss = 104/104/0%, min/avg/max = 338/346/461"
+            .split('\n'),
+            |line| Control::parse(line).expect(line),
+        ), &[
+            Control::StatusBegin,
+            Control::RandomLocalTime,
+            Control::StatusLine {
+                target: "dns.google",
+                addr: "8.8.4.4",
+                sent: 104,
+                received: 104
+            },
+            Control::StatusLine {
+                target: "localhost",
+                addr: "127.0.0.1",
+                sent: 104,
+                received: 104
+            },
+            Control::StatusLine {
+                target: "8.8.8.7",
+                addr: "8.8.8.7",
+                sent: 0,
+                received: 0
+            },
+            Control::StatusLine {
+                target: "ipv6.google.com",
+                addr: "2a00:1450:400e:806::200e",
+                sent: 104,
+                received: 0
+            },
+            Control::StatusLine {
+                target: "ns1.webtraf.com.au",
+                addr: "103.224.162.40",
+                sent: 104,
+                received: 104
+            },
+        ]);
+    }
+}
