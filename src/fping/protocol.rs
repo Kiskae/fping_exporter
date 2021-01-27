@@ -1,5 +1,6 @@
 use regex::Regex;
 use std::time::Duration;
+
 #[derive(Debug, PartialEq)]
 pub struct Ping<S> {
     pub timestamp: Duration,
@@ -66,14 +67,19 @@ pub enum Control<S> {
         addr: S,
         error: S,
     },
-    StatusBegin,
+    FpingError {
+        target: S,
+        message: S,
+    },
+    BlankLine,
     RandomLocalTime,
-    StatusLine {
+    TargetSummary {
         target: S,
         addr: S,
         sent: u32,
         received: u32,
     },
+    Unhandled(S),
 }
 
 impl<'t> Control<&'t str> {
@@ -99,6 +105,24 @@ impl<'t> Control<&'t str> {
         })
     }
 
+    fn parse_fping_error(raw: &'t str) -> Option<Self> {
+        lazy_static! {
+            static ref FPING_ERROR: Regex = Regex::new(
+                r"(?x)
+                ^(?P<target>[^:]+):
+                \ (?P<msg>.*)$
+            "
+            )
+            .unwrap();
+        }
+
+        let caps: regex::Captures = FPING_ERROR.captures(raw)?;
+        Some(Control::FpingError {
+            target: caps.name("target")?.as_str(),
+            message: caps.name("msg")?.as_str(),
+        })
+    }
+
     fn parse_status_line(raw: &'t str) -> Option<Self> {
         lazy_static! {
             static ref STATUS_LINE: Regex = Regex::new(
@@ -115,7 +139,7 @@ impl<'t> Control<&'t str> {
         }
 
         let caps: regex::Captures = STATUS_LINE.captures(raw)?;
-        Some(Control::StatusLine {
+        Some(Control::TargetSummary {
             target: caps.name("target")?.as_str(),
             addr: caps.name("addr")?.as_str(),
             received: caps.name("rcv")?.as_str().parse().ok()?,
@@ -123,7 +147,7 @@ impl<'t> Control<&'t str> {
         })
     }
 
-    pub fn parse<S: AsRef<str> + ?Sized>(raw: &'t S) -> Option<Self> {
+    pub fn parse<S: AsRef<str> + ?Sized>(raw: &'t S) -> Self {
         #[inline]
         fn wrap_option<T, E: Copy>(
             try_fn: impl FnOnce(E) -> Option<T>,
@@ -134,7 +158,8 @@ impl<'t> Control<&'t str> {
         Err(raw.as_ref())
             .or_else(wrap_option(|x: &str| {
                 if x.is_empty() {
-                    Some(Control::StatusBegin)
+                    //TODO: check whether an empty line is printed anywhere else....
+                    Some(Control::BlankLine)
                 } else if x.starts_with('[') && x.ends_with(']') {
                     Some(Control::RandomLocalTime)
                 } else {
@@ -143,7 +168,8 @@ impl<'t> Control<&'t str> {
             }))
             .or_else(wrap_option(Self::parse_icmp_error))
             .or_else(wrap_option(Self::parse_status_line))
-            .ok()
+            .or_else(wrap_option(Self::parse_fping_error))
+            .unwrap_or_else(Control::Unhandled)
     }
 }
 
@@ -182,35 +208,35 @@ mod tests {
             ipv6.google.com (2a00:1450:400e:806::200e) : xmt/rcv/%loss = 104/0/100%\n\
             ns1.webtraf.com.au (103.224.162.40) : xmt/rcv/%loss = 104/104/0%, min/avg/max = 338/346/461"
             .split('\n'),
-            |line| Control::parse(line).expect(line),
+            |line| Control::parse(line),
         ), &[
-            Control::StatusBegin,
+            Control::BlankLine,
             Control::RandomLocalTime,
-            Control::StatusLine {
+            Control::TargetSummary {
                 target: "dns.google",
                 addr: "8.8.4.4",
                 sent: 104,
                 received: 104
             },
-            Control::StatusLine {
+            Control::TargetSummary {
                 target: "localhost",
                 addr: "127.0.0.1",
                 sent: 104,
                 received: 104
             },
-            Control::StatusLine {
+            Control::TargetSummary {
                 target: "8.8.8.7",
                 addr: "8.8.8.7",
                 sent: 0,
                 received: 0
             },
-            Control::StatusLine {
+            Control::TargetSummary {
                 target: "ipv6.google.com",
                 addr: "2a00:1450:400e:806::200e",
                 sent: 104,
                 received: 0
             },
-            Control::StatusLine {
+            Control::TargetSummary {
                 target: "ns1.webtraf.com.au",
                 addr: "103.224.162.40",
                 sent: 104,
