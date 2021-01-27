@@ -6,7 +6,7 @@ use std::{
 };
 use thiserror::Error;
 
-use crate::fping::version::VersionError;
+use crate::fping::{version::VersionError, Launcher};
 
 #[derive(Debug, Error)]
 pub enum ArgsError {
@@ -106,7 +106,11 @@ fn convert_to_args(
     })
 }
 
-pub fn load_args(version: Result<semver::Version, VersionError>) -> Result<Args, ArgsError> {
+pub async fn load_args(
+    launcher: &Launcher<'_>,
+    discover_timeout: Duration,
+) -> Result<Args, ArgsError> {
+    let version = launcher.version(discover_timeout).await;
     convert_to_args(
         clap_app()
             .long_version(format_long_version(version.as_ref().ok()).as_str())

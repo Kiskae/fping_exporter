@@ -99,7 +99,7 @@ struct ExclusiveClaim<T> {
 struct LockControl<H> {
     handler: H,
     lock: std::sync::Arc<tokio::sync::Mutex<()>>,
-}
+                    }
 
 impl<H> LockControl<H> {
     fn wrap(handler: H) -> Self {
@@ -142,7 +142,7 @@ async fn main() -> anyhow::Result<()> {
     pretty_env_logger::init();
     let fping_binary = env::var("FPING_BIN").unwrap_or_else(|_| "fping".into());
     let launcher = fping::for_program(&fping_binary);
-    let args = args::load_args(launcher.version(discovery_timeout()).await)?;
+    let args = args::load_args(&launcher, discovery_timeout()).await?;
 
     if VersionReq::parse(">=4.3.0")
         .unwrap()
