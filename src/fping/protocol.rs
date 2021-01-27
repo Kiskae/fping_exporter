@@ -1,31 +1,31 @@
 use regex::Regex;
 use std::time::Duration;
 #[derive(Debug, PartialEq)]
-pub struct Ping<'t> {
+pub struct Ping<S> {
     pub timestamp: Duration,
-    pub target: &'t str,
-    pub addr: &'t str,
+    pub target: S,
+    pub addr: S,
     pub seq: u64,
     pub result: Option<Duration>,
 }
 
-impl<'t> Ping<'t> {
-    pub fn parse(raw: &str) -> Option<Ping> {
+impl<'y> Ping<&'y str> {
+    pub fn parse<S: AsRef<str> + ?Sized>(raw: &'y S) -> Option<Self> {
         lazy_static! {
             static ref FPING_LINE: Regex = Regex::new(
                 r"(?x)
-                ^\[(?P<ts>[^\]]+)\]          # [1607718717.47230] 
-                \s(?P<id>.+?)                # dns.google
-                \s\((?P<addr>[^\)]+)\)\s+:   # (8.8.8.8)                       :
-                \s\[(?P<seq>\d+)\],          # [0], 
-                \s(?:
-                    timed|                   # timed out 
-                    \d+\sbytes,\s(?P<rtt>    # 64 bytes, 
-                        [^\s]+               # 18.3 ms || 283 ms
-                    )\s ms
-                )
-                .*$
-            "
+                    ^\[(?P<ts>[^\]]+)\]          # [1607718717.47230] 
+                    \s(?P<id>.+?)                # dns.google
+                    \s\((?P<addr>[^\)]+)\)\s+:   # (8.8.8.8)                       :
+                    \s\[(?P<seq>\d+)\],          # [0], 
+                    \s(?:
+                        timed|                   # timed out 
+                        \d+\sbytes,\s(?P<rtt>    # 64 bytes, 
+                            [^\s]+               # 18.3 ms || 283 ms
+                        )\s ms
+                    )
+                    .*$
+                "
             )
             .unwrap();
         }
@@ -37,7 +37,7 @@ impl<'t> Ping<'t> {
             MILLISECOND.mul_f64(time)
         }
 
-        let caps = FPING_LINE.captures(raw)?;
+        let caps = FPING_LINE.captures(raw.as_ref())?;
         Some(Ping {
             timestamp: caps
                 .name("ts")?
@@ -59,25 +59,25 @@ impl<'t> Ping<'t> {
     }
 }
 
-#[derive(Debug)]
-pub enum Control<'t> {
+#[derive(Debug, PartialEq)]
+pub enum Control<S> {
     IcmpError {
-        target: &'t str,
-        addr: &'t str,
-        error: &'t str,
+        target: S,
+        addr: S,
+        error: S,
     },
     StatusBegin,
     RandomLocalTime,
     StatusLine {
-        target: &'t str,
-        addr: &'t str,
+        target: S,
+        addr: S,
         sent: u32,
         received: u32,
     },
 }
 
-impl<'t> Control<'t> {
-    fn parse_icmp_error(raw: &str) -> Option<Control> {
+impl<'t> Control<&'t str> {
+    fn parse_icmp_error(raw: &'t str) -> Option<Self> {
         lazy_static! {
             static ref ICMP_ERROR: Regex = Regex::new(
                 r"(?x)
@@ -99,7 +99,7 @@ impl<'t> Control<'t> {
         })
     }
 
-    fn parse_status_line(raw: &str) -> Option<Control> {
+    fn parse_status_line(raw: &'t str) -> Option<Self> {
         lazy_static! {
             static ref STATUS_LINE: Regex = Regex::new(
                 r"(?x)
@@ -123,7 +123,7 @@ impl<'t> Control<'t> {
         })
     }
 
-    pub fn parse(raw: &str) -> Option<Control> {
+    pub fn parse<S: AsRef<str> + ?Sized>(raw: &'t S) -> Option<Self> {
         #[inline]
         fn wrap_option<T, E: Copy>(
             try_fn: impl FnOnce(E) -> Option<T>,
@@ -131,7 +131,7 @@ impl<'t> Control<'t> {
             |value| try_fn(value).ok_or(value)
         }
 
-        Err(raw)
+        Err(raw.as_ref())
             .or_else(wrap_option(|x: &str| {
                 if x.is_empty() {
                     Some(Control::StatusBegin)
