@@ -6,6 +6,8 @@ on:
       - "src/**"
       - "Cargo.lock"
   push:
+    branches:
+      - main
     paths:
       - "src/**"
       - "Cargo.lock"
