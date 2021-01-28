@@ -10,24 +10,29 @@ extern crate log;
 #[macro_use]
 extern crate clap;
 
-use std::{collections::HashMap, convert::Infallible, env, io, time::Duration};
+use std::{collections::HashMap, env, io, time::Duration};
 
 use semver::VersionReq;
 
 mod args;
 mod event_stream;
 mod fping;
+mod http;
 
 #[cfg(all(feature = "docker", unix))]
-async fn terminate_signal() -> Option<()> {
+async fn terminate_signal() -> Option<&'static str> {
     // Docker signals container shutdown through SIGTERM
     use tokio::signal::unix::{signal, SignalKind};
-    signal(SignalKind::terminate()).ok()?.recv().await
+    signal(SignalKind::terminate())
+        .ok()?
+        .recv()
+        .await
+        .map(|_| "SIGTERM")
 }
 
 #[cfg(not(all(feature = "docker", unix)))]
-async fn terminate_signal() -> Option<()> {
-    tokio::signal::ctrl_c().await.ok()
+async fn terminate_signal() -> Option<&'static str> {
+    tokio::signal::ctrl_c().await.ok().map(|_| "SIGINT")
 }
 
 #[cfg(debug_assertions)]
@@ -84,9 +89,11 @@ impl<O: AsRef<str>, E: AsRef<str>, H, T: std::fmt::Debug> event_stream::EventHan
                 None
             };
             //TODO: record ping
-            debug!("rtt {:?} on [{},{}]", ping.result, ping.target, ping.addr);
-            debug!("ipvd {:?} on [{},{}]", _delta, ping.target, ping.addr);
+            trace!("rtt {:?} on [{},{}]", ping.result, ping.target, ping.addr);
             //TODO: record delta
+            trace!("ipvd {:?} on [{},{}]", _delta, ping.target, ping.addr);
+        } else {
+            error!("unhandled stdout: {}", event.as_ref());
         }
     }
 
@@ -99,15 +106,18 @@ impl<O: AsRef<str>, E: AsRef<str>, H, T: std::fmt::Debug> event_stream::EventHan
                 sent,
                 received,
             } => {
-                debug!(
+                trace!(
                     "packet loss ({}/{}) on [{},{}]",
-                    received, sent, target, addr
+                    received,
+                    sent,
+                    target,
+                    addr
                 );
                 //TODO: record sent/received
                 self.current_targets += 1;
-                if self.current_targets >= self.expected_targets {
+                if self.current_targets == self.expected_targets {
+                    let _ = self.held_token.take();
                     //TODO: resolve held_token
-                    self.held_token = None;
                 }
             }
             Control::RandomLocalTime => {
@@ -115,7 +125,7 @@ impl<O: AsRef<str>, E: AsRef<str>, H, T: std::fmt::Debug> event_stream::EventHan
                 self.expected_targets = std::cmp::max(self.expected_targets, self.current_targets);
                 self.current_targets = 0;
             }
-            e => trace!("Unhandled: {:?}", e),
+            e => trace!("unhandled stderr:\n{:#?}", e),
         }
     }
 
@@ -154,19 +164,20 @@ async fn main() -> anyhow::Result<()> {
         .with_controls::<u32>(None);
 
     tokio::select! {
-        //TODO: terminate_signal => None -> failure to register handler
-        Some(_) = terminate_signal() => {
-            info!("received term")
-            //TODO: log terminate signal
+        e = terminate_signal() => {
+            match e {
+                Some(signal) => debug!("received {}", signal),
+                None => error!("failure registering signal handler")
+            }
         },
         res = fping.listen(MetricsState::new()) => {
+            // fping should be
+            error!("fping listener terminated:\n{:#?}", res);
             res?;
-            // Unexpected end, fall through and let clean up handle it
         },
-        res = metrics_handler(&args.metrics) => {
+        res = http::publish_metrics(&args.metrics) => {
+            debug!("http handler terminated:\n{:#?}", res);
             res?;
-            error!("execution timeout")
-            //TODO: log execution timeout
         }
     }
 
