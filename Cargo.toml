@@ -13,6 +13,7 @@ humantime = "2.1"
 lazy_static = "1.4"
 log = {version = "0.4", features = ["release_max_level_info"]}
 pretty_env_logger = "0.4"
+prometheus = {version = "0.11", features = ["process"]}
 regex = "1"
 semver = "0.11"
 thiserror = "1"
