@@ -12,12 +12,16 @@ extern crate clap;
 
 use std::{collections::HashMap, env, io, time::Duration};
 
+use clap::crate_version;
+use prometheus::{labels, opts};
 use semver::VersionReq;
 
 mod args;
 mod event_stream;
 mod fping;
 mod http;
+//mod metrics;
+//mod sync;
 
 #[cfg(all(feature = "docker", unix))]
 async fn terminate_signal() -> Option<&'static str> {
@@ -131,12 +135,29 @@ impl<O: AsRef<str>, E: AsRef<str>, H, T: std::fmt::Debug> event_stream::EventHan
     }
 }
 
+fn info_metric(ver: semver::Version) -> impl prometheus::core::Collector {
+    let ver = ver.to_string();
+    let metric = prometheus::Counter::with_opts(opts!(
+        "fping_info",
+        "exporter runtime information",
+        labels! {
+            "version" => crate_version!(),
+            "fping_version" => &ver
+        }
+    ))
+    .unwrap();
+    metric.inc();
+    metric
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     pretty_env_logger::init();
     let fping_binary = env::var("FPING_BIN").unwrap_or_else(|_| "fping".into());
     let launcher = fping::for_program(&fping_binary);
     let args = args::load_args(&launcher, discovery_timeout()).await?;
+
+    prometheus::register(Box::new(info_metric(args.fping_version.clone())))?;
 
     let _ = if VersionReq::parse(">=4.3.0")
         .unwrap()
