@@ -10,7 +10,7 @@ use crate::event_stream::{EventStreamSource, PendingStream};
 mod protocol;
 pub mod version;
 
-pub use protocol::{Control, Ping};
+pub use protocol::{Control, Ping, SentReceivedSummary, LABEL_NAMES};
 
 pub struct Launcher<'t> {
     program: &'t str,

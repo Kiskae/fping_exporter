@@ -71,9 +71,9 @@ impl<O: AsRef<str>, E: AsRef<str>, H, T: std::fmt::Debug> event_stream::EventHan
 {
     fn on_output(&mut self, event: O) {
         if let Some(ping) = fping::Ping::parse(&event) {
-            let _delta = if let Some(rtt) = ping.result {
+            if let Some(rtt) = ping.result {
                 let one_way_delay = rtt.div_f64(2.0).as_secs_f64();
-                match self.last_result.get_mut(ping.target) {
+                let delta = match self.last_result.get_mut(ping.target) {
                     Some(prev) => {
                         let delta = (*prev - one_way_delay).abs();
                         *prev = one_way_delay;
@@ -84,14 +84,15 @@ impl<O: AsRef<str>, E: AsRef<str>, H, T: std::fmt::Debug> event_stream::EventHan
                             .insert(ping.target.to_owned(), one_way_delay);
                         None
                     }
-                }
+                };
+
+                //TODO: record ping
+                trace!("rtt {:?} on {:?}", ping.result, ping.labels());
+                //TODO: record delta
+                trace!("ipvd {:?} on {:?}", delta, ping.labels());
             } else {
-                None
-            };
-            //TODO: record ping
-            trace!("rtt {:?} on [{},{}]", ping.result, ping.target, ping.addr);
-            //TODO: record delta
-            trace!("ipvd {:?} on [{},{}]", _delta, ping.target, ping.addr);
+                trace!("timeout on {:?}", ping.labels());
+            }
         } else {
             error!("unhandled stdout: {}", event.as_ref());
         }
@@ -100,27 +101,21 @@ impl<O: AsRef<str>, E: AsRef<str>, H, T: std::fmt::Debug> event_stream::EventHan
     fn on_error(&mut self, event: E) {
         use fping::Control;
         match Control::parse(&event) {
-            Control::TargetSummary {
-                target,
-                addr,
-                sent,
-                received,
-            } => {
+            Control::TargetSummary(summary) => {
                 trace!(
-                    "packet loss ({}/{}) on [{},{}]",
-                    received,
-                    sent,
-                    target,
-                    addr
+                    "packet loss ({}/{}) on {:?}",
+                    summary.received,
+                    summary.sent,
+                    summary.labels()
                 );
                 //TODO: record sent/received
                 self.current_targets += 1;
                 if self.current_targets == self.expected_targets {
-                    let _ = self.held_token.take();
+                    let _ = self.held_token.take().expect("missing token");
                     //TODO: resolve held_token
                 }
             }
-            Control::RandomLocalTime => {
+            Control::SummaryLocalTime => {
                 // Reset expected targets
                 self.expected_targets = std::cmp::max(self.expected_targets, self.current_targets);
                 self.current_targets = 0;

@@ -1,6 +1,9 @@
 use regex::Regex;
 use std::time::Duration;
 
+#[allow(dead_code)]
+pub const LABEL_NAMES: [&str; 2] = ["target", "addr"];
+
 #[derive(Debug, PartialEq)]
 pub struct Ping<S> {
     pub timestamp: Duration,
@@ -60,25 +63,32 @@ impl<'y> Ping<&'y str> {
     }
 }
 
+impl<S: Copy> Ping<S> {
+    pub fn labels(&self) -> [S; 2] {
+        [self.target, self.addr]
+    }
+}
+#[derive(Debug, PartialEq)]
+pub struct SentReceivedSummary<S> {
+    pub target: S,
+    pub addr: S,
+    pub sent: u32,
+    pub received: u32,
+}
+
+impl<S: Copy> SentReceivedSummary<S> {
+    pub fn labels(&self) -> [S; 2] {
+        [self.target, self.addr]
+    }
+}
+
 #[derive(Debug, PartialEq)]
 pub enum Control<S> {
-    IcmpError {
-        target: S,
-        addr: S,
-        error: S,
-    },
-    FpingError {
-        target: S,
-        message: S,
-    },
+    IcmpError { target: S, addr: S, error: S },
+    FpingError { target: S, message: S },
     BlankLine,
-    RandomLocalTime,
-    TargetSummary {
-        target: S,
-        addr: S,
-        sent: u32,
-        received: u32,
-    },
+    SummaryLocalTime,
+    TargetSummary(SentReceivedSummary<S>),
     Unhandled(S),
 }
 
@@ -139,12 +149,12 @@ impl<'t> Control<&'t str> {
         }
 
         let caps: regex::Captures = STATUS_LINE.captures(raw)?;
-        Some(Control::TargetSummary {
+        Some(Control::TargetSummary(SentReceivedSummary {
             target: caps.name("target")?.as_str(),
             addr: caps.name("addr")?.as_str(),
             received: caps.name("rcv")?.as_str().parse().ok()?,
             sent: caps.name("xmt")?.as_str().parse().ok()?,
-        })
+        }))
     }
 
     pub fn parse<S: AsRef<str> + ?Sized>(raw: &'t S) -> Self {
@@ -161,7 +171,7 @@ impl<'t> Control<&'t str> {
                     //TODO: check whether an empty line is printed anywhere else....
                     Some(Control::BlankLine)
                 } else if x.starts_with('[') && x.ends_with(']') {
-                    Some(Control::RandomLocalTime)
+                    Some(Control::SummaryLocalTime)
                 } else {
                     None
                 }
@@ -211,37 +221,37 @@ mod tests {
             |line| Control::parse(line),
         ), &[
             Control::BlankLine,
-            Control::RandomLocalTime,
-            Control::TargetSummary {
+            Control::SummaryLocalTime,
+            Control::TargetSummary(SentReceivedSummary {
                 target: "dns.google",
                 addr: "8.8.4.4",
                 sent: 104,
                 received: 104
-            },
-            Control::TargetSummary {
+            }),
+            Control::TargetSummary(SentReceivedSummary  {
                 target: "localhost",
                 addr: "127.0.0.1",
                 sent: 104,
                 received: 104
-            },
-            Control::TargetSummary {
+            }),
+            Control::TargetSummary(SentReceivedSummary  {
                 target: "8.8.8.7",
                 addr: "8.8.8.7",
                 sent: 0,
                 received: 0
-            },
-            Control::TargetSummary {
+            }),
+            Control::TargetSummary(SentReceivedSummary  {
                 target: "ipv6.google.com",
                 addr: "2a00:1450:400e:806::200e",
                 sent: 104,
                 received: 0
-            },
-            Control::TargetSummary {
+            }),
+            Control::TargetSummary(SentReceivedSummary  {
                 target: "ns1.webtraf.com.au",
                 addr: "103.224.162.40",
                 sent: 104,
                 received: 104
-            },
+            }),
         ]);
     }
 }
