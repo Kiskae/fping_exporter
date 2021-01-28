@@ -58,33 +58,49 @@ impl<ES: EventStreamSource, T> PendingStream<ES, T> {
         &mut self,
         mut handler: impl EventHandler<String, String, ES::Handle, T>,
     ) -> io::Result<()> {
-        async fn optional_call<T, F, O>(opt: Option<T>, async_fn: impl FnOnce(T) -> F) -> Option<O>
-        where
-            F: future::Future<Output = Option<O>>,
-        {
-            match opt {
-                Some(x) => async_fn(x).await,
-                None => None,
-            }
-        }
-
-        async fn get_line<R>(lines: &mut Lines<R>) -> Option<io::Result<String>>
+        async fn next_line<R>(lines: &mut Lines<R>) -> Option<io::Result<String>>
         where
             R: tokio::io::AsyncBufRead + Unpin,
         {
             lines.next_line().await.transpose()
         }
 
+        async fn poll<T, F, O>(source: Option<T>, op: impl FnOnce(T) -> F) -> Option<O>
+        where
+            F: future::Future<Output = Option<O>>,
+        {
+            op(source?).await
+        }
+
+        #[inline]
+        fn handle_or_eof<E, Err>(
+            label: &str,
+            ev: Option<Result<E, Err>>,
+            eof_flag: &mut bool,
+            handler: impl FnOnce(E),
+        ) -> Result<(), Err> {
+            if let Some(ev) = ev {
+                handler(ev?);
+            } else {
+                *eof_flag = true;
+                debug!("{} EOF", label);
+            }
+            Ok(())
+        }
+
+        let mut out_eof = false;
+        let mut err_eof = false;
+
         loop {
             tokio::select! {
-                Some(token) = optional_call(self.control.as_mut(), mpsc::Receiver::recv) => {
-                    handler.on_control(&mut self.handle, token)?;
+                Some(token) = poll(self.control.as_mut(), mpsc::Receiver::recv), if !(out_eof && err_eof) => {
+                    handler.on_control(&mut self.handle, token)?
                 }
-                Some(out) = optional_call(self.stdout.as_mut(), get_line) => {
-                    handler.on_output(out?);
+                ev = poll(self.stdout.as_mut(), next_line), if !out_eof => {
+                    handle_or_eof("stdout", ev, &mut out_eof, |x| handler.on_output(x))?;
                 }
-                Some(err) = optional_call(self.stderr.as_mut(), get_line) => {
-                    handler.on_error(err?);
+                ev = poll(self.stderr.as_mut(), next_line), if !err_eof => {
+                    handle_or_eof("stderr", ev, &mut err_eof, |x| handler.on_error(x))?;
                 }
                 else => {
                     break;
