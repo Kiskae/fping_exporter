@@ -132,9 +132,12 @@ impl<O: AsRef<str>, E: AsRef<str>, H, T: std::fmt::Debug> event_stream::EventHan
                 sent,
                 received,
             } => {
-                debug!("packet loss ({}/{}) on [{},{}]", received, sent, target, addr);
+                debug!(
+                    "packet loss ({}/{}) on [{},{}]",
+                    received, sent, target, addr
+                );
                 //TODO: record sent/received
-                self.current_targets = self.current_targets + 1;
+                self.current_targets += 1;
                 if self.current_targets >= self.expected_targets {
                     //TODO: resolve held_token
                     self.held_token = None;
