@@ -15,6 +15,7 @@ use std::{collections::HashMap, convert::Infallible, env, io, time::Duration};
 use clap::crate_version;
 use prometheus::{labels, opts};
 use semver::VersionReq;
+use tokio::sync::oneshot;
 
 mod args;
 mod event_stream;
@@ -70,17 +71,17 @@ impl<T> MetricsState<T> {
     }
 
     fn calc_ipdv(&mut self, target: &str, rtt: Duration) -> Option<f64> {
-                let one_way_delay = rtt.div_f64(2.0).as_secs_f64();
+        let one_way_delay = rtt.div_f64(2.0).as_secs_f64();
         match self.last_result.get_mut(target) {
-                    Some(prev) => {
-                        let delta = (*prev - one_way_delay).abs();
-                        *prev = one_way_delay;
-                        Some(delta)
-                    }
-                    None => {
+            Some(prev) => {
+                let delta = (*prev - one_way_delay).abs();
+                *prev = one_way_delay;
+                Some(delta)
+            }
+            None => {
                 self.last_result.insert(target.to_owned(), one_way_delay);
-                        None
-                    }
+                None
+            }
         }
     }
 }
@@ -91,6 +92,13 @@ trait OnSummaryComplete {
 
 impl OnSummaryComplete for Infallible {
     fn on_completed(self) {}
+}
+
+impl OnSummaryComplete for oneshot::Sender<()> {
+    fn on_completed(self) {
+        // The receiver might be gone, this is fine
+        let _ = self.send(());
+    }
 }
 
 impl<O: AsRef<str>, E: AsRef<str>, H, T: OnSummaryComplete> event_stream::EventHandler<O, E, H, T>
@@ -145,7 +153,7 @@ impl<O: AsRef<str>, E: AsRef<str>, H, T: OnSummaryComplete> event_stream::EventH
     }
 }
 
-fn info_metric(ver: semver::Version) -> impl prometheus::core::Collector {
+fn info_metric(ver: semver::Version) -> Box<dyn prometheus::core::Collector> {
     let ver = ver.to_string();
     let metric = prometheus::Counter::with_opts(opts!(
         "fping_info",
@@ -157,7 +165,7 @@ fn info_metric(ver: semver::Version) -> impl prometheus::core::Collector {
     ))
     .unwrap();
     metric.inc();
-    metric
+    Box::new(metric)
 }
 
 #[tokio::main]
@@ -167,27 +175,23 @@ async fn main() -> anyhow::Result<()> {
     let launcher = fping::for_program(&fping_binary);
     let args = args::load_args(&launcher, discovery_timeout()).await?;
 
-    prometheus::register(Box::new(info_metric(args.fping_version.clone())))?;
+    prometheus::register(info_metric(args.fping_version.clone()))?;
 
-    let _ = if VersionReq::parse(">=4.3.0")
+    let (http_tx, rx) = if VersionReq::parse(">=4.3.0")
         .unwrap()
         .matches(&args.fping_version)
     {
-        info!("supports signal summary");
-        1
+        info!("SIGQUIT signal summary enabled");
+        http::RegistryAccess::<()>::new(prometheus::default_registry(), Some(1))
     } else {
         warn!(
-            "fping {} does not support summary requests, packet loss may be inaccurate",
+            "fping {} does not support summary requests, accurate packet loss will not be available",
             args.fping_version
         );
-        0
+        http::RegistryAccess::new(prometheus::default_registry(), None)
     };
 
-    // change behavior based on args.fping_version
-    let mut fping = launcher
-        .spawn(&args.targets)
-        .await?
-        .with_controls::<u32>(None);
+    let mut fping = launcher.spawn(&args.targets).await?.with_controls(rx);
 
     tokio::select! {
         e = terminate_signal() => {
@@ -201,7 +205,7 @@ async fn main() -> anyhow::Result<()> {
             error!("fping listener terminated:\n{:#?}", res);
             res?;
         },
-        res = http::publish_metrics(&args.metrics) => {
+        res = http::publish_metrics(&args.metrics, http_tx) => {
             debug!("http handler terminated:\n{:#?}", res);
             res?;
         }
