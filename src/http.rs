@@ -6,7 +6,9 @@ use warp::{reply::with_header, Rejection, Reply};
 
 use crate::args::MetricArgs;
 
-fn encode_metrics<E: Encoder + Default>(metrics: &[MetricFamily]) -> prometheus::Result<impl Reply> {
+fn encode_metrics<E: Encoder + Default>(
+    metrics: &[MetricFamily],
+) -> prometheus::Result<impl Reply> {
     let enc: E = Default::default();
     let mut out = Vec::new();
     enc.encode(metrics, &mut out)?;
