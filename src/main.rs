@@ -10,7 +10,7 @@ extern crate log;
 #[macro_use]
 extern crate clap;
 
-use std::{collections::HashMap, env, io, time::Duration};
+use std::{collections::HashMap, convert::Infallible, env, io, time::Duration};
 
 use clap::crate_version;
 use prometheus::{labels, opts};
@@ -68,27 +68,38 @@ impl<T> MetricsState<T> {
             held_token: None,
         }
     }
-}
 
-impl<O: AsRef<str>, E: AsRef<str>, H, T: std::fmt::Debug> event_stream::EventHandler<O, E, H, T>
-    for MetricsState<T>
-{
-    fn on_output(&mut self, event: O) {
-        if let Some(ping) = fping::Ping::parse(&event) {
-            if let Some(rtt) = ping.result {
+    fn calc_ipdv(&mut self, target: &str, rtt: Duration) -> Option<f64> {
                 let one_way_delay = rtt.div_f64(2.0).as_secs_f64();
-                let delta = match self.last_result.get_mut(ping.target) {
+        match self.last_result.get_mut(target) {
                     Some(prev) => {
                         let delta = (*prev - one_way_delay).abs();
                         *prev = one_way_delay;
                         Some(delta)
                     }
                     None => {
-                        self.last_result
-                            .insert(ping.target.to_owned(), one_way_delay);
+                self.last_result.insert(target.to_owned(), one_way_delay);
                         None
                     }
-                };
+        }
+    }
+}
+
+trait OnSummaryComplete {
+    fn on_completed(self);
+}
+
+impl OnSummaryComplete for Infallible {
+    fn on_completed(self) {}
+}
+
+impl<O: AsRef<str>, E: AsRef<str>, H, T: OnSummaryComplete> event_stream::EventHandler<O, E, H, T>
+    for MetricsState<T>
+{
+    fn on_output(&mut self, event: O) {
+        if let Some(ping) = fping::Ping::parse(&event) {
+            if let Some(rtt) = ping.result {
+                let delta = self.calc_ipdv(ping.target, rtt);
 
                 //TODO: record ping
                 trace!("rtt {:?} on {:?}", ping.result, ping.labels());
@@ -115,8 +126,8 @@ impl<O: AsRef<str>, E: AsRef<str>, H, T: std::fmt::Debug> event_stream::EventHan
                 //TODO: record sent/received
                 self.current_targets += 1;
                 if self.current_targets == self.expected_targets {
-                    let _ = self.held_token.take().expect("missing token");
-                    //TODO: resolve held_token
+                    let token = self.held_token.take().expect("missing token");
+                    token.on_completed();
                 }
             }
             Control::SummaryLocalTime => {
@@ -129,7 +140,6 @@ impl<O: AsRef<str>, E: AsRef<str>, H, T: std::fmt::Debug> event_stream::EventHan
     }
 
     fn on_control(&mut self, _: &mut H, token: T) -> io::Result<()> {
-        debug_assert!(self.held_token.is_none());
         self.held_token = Some(token);
         Ok(())
     }
