@@ -97,11 +97,17 @@ impl<T, P> MetricsState<T, P> {
 
 trait OnSummaryComplete {
     fn on_completed(self);
+
+    fn is_alive(&self) -> bool;
 }
 
 // Either signals are completely disabled
 impl OnSummaryComplete for Infallible {
     fn on_completed(self) {}
+
+    fn is_alive(&self) -> bool {
+        false
+    }
 }
 
 // Or we have exclusive access that has then been successfully applied as
@@ -111,6 +117,11 @@ impl OnSummaryComplete for Interrupted<(oneshot::Sender<Claim>, Claim)> {
         // The receiver might be gone, this is fine
         let Interrupted((tx, claim)) = self;
         let _ = tx.send(claim);
+    }
+
+    fn is_alive(&self) -> bool {
+        let Interrupted((ref tx, _)) = self;
+        !tx.is_closed()
     }
 }
 
@@ -137,6 +148,13 @@ impl<O: AsRef<str>, E: AsRef<str>, H, T: OnSummaryComplete> event_stream::EventH
         } else {
             error!("unhandled stdout: {}", event.as_ref());
         }
+
+        if let Some(token) = self.held_token.as_ref() {
+            if !token.is_alive() {
+                debug!("dropping dead token");
+                self.held_token = None;
+            }
+        }
     }
 
     fn on_error(&mut self, event: Self::Error) {
@@ -152,12 +170,24 @@ impl<O: AsRef<str>, E: AsRef<str>, H, T: OnSummaryComplete> event_stream::EventH
                 );
                 //TODO: record sent/received
                 self.current_targets += 1;
+                trace!(
+                    "{} out of {} targets summarized",
+                    self.current_targets,
+                    self.expected_targets
+                );
                 if self.current_targets == self.expected_targets {
-                    let token = self.held_token.take().expect("missing token");
+                    if let Some(token) = self.held_token.take() {
                     token.on_completed();
+                    } else {
+                        warn!("summary received, but no token held")
+                    }
                 }
             }
             Control::SummaryLocalTime => {
+                if self.held_token.is_none() {
+                    warn!("summary manually triggered, may race with metrics output");
+                }
+
                 // Reset expected targets
                 self.expected_targets = std::cmp::max(self.expected_targets, self.current_targets);
                 self.current_targets = 0;
@@ -167,6 +197,7 @@ impl<O: AsRef<str>, E: AsRef<str>, H, T: OnSummaryComplete> event_stream::EventH
     }
 
     fn on_control(&mut self, _: &mut Self::Handle, token: Self::Token) -> io::Result<()> {
+        trace!("control token received");
         self.held_token = Some(token);
         Ok(())
     }
