@@ -29,18 +29,17 @@ use crate::util::{
     lock::{Claim, LockControl},
     signal::{ControlToInterrupt, Interrupted},
 };
-//mod metrics;
-//mod sync;
 
 #[cfg(all(feature = "docker", unix))]
 async fn terminate_signal() -> Option<&'static str> {
     // Docker signals container shutdown through SIGTERM
     use tokio::signal::unix::{signal, SignalKind};
-    signal(SignalKind::terminate())
-        .ok()?
-        .recv()
-        .await
-        .map(|_| "SIGTERM")
+    let mut term = signal(SignalKind::terminate()).ok()?;
+    tokio::select! {
+        Some(_) = term.recv() => Some("SIGTERM"),
+        Ok(_) = tokio::signal::ctrl_c() => Some("SIGINT"),
+        else => None
+    }
 }
 
 #[cfg(not(all(feature = "docker", unix)))]
