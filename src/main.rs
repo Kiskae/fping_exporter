@@ -10,12 +10,14 @@ extern crate log;
 #[macro_use]
 extern crate clap;
 
-use std::{collections::HashMap, convert::Infallible, env, io, time::Duration};
+use std::{
+    collections::HashMap, convert::Infallible, env, io, marker::PhantomData, time::Duration,
+};
 
 use clap::crate_version;
 use prometheus::{labels, opts};
 use semver::VersionReq;
-use tokio::{process::Child, sync::oneshot};
+use tokio::sync::oneshot;
 
 mod args;
 mod event_stream;
@@ -25,7 +27,7 @@ mod util;
 
 use crate::util::{
     lock::{Claim, LockControl},
-    signal::{apply as signal_to_interrupt, Interrupted},
+    signal::{ControlToInterrupt, Interrupted},
 };
 //mod metrics;
 //mod sync;
@@ -59,20 +61,22 @@ fn discovery_timeout() -> Duration {
 }
 
 #[derive(Debug)]
-struct MetricsState<T> {
+struct MetricsState<T, P> {
     last_result: HashMap<String, f64>,
     expected_targets: u32,
     current_targets: u32,
     held_token: Option<T>,
+    _marker: PhantomData<P>,
 }
 
-impl<T> MetricsState<T> {
+impl<T, P> MetricsState<T, P> {
     fn new() -> Self {
         Self {
             last_result: HashMap::default(),
             expected_targets: 1,
             current_targets: 0,
             held_token: None,
+            _marker: PhantomData,
         }
     }
 
@@ -111,10 +115,15 @@ impl OnSummaryComplete for Interrupted<(oneshot::Sender<Claim>, Claim)> {
     }
 }
 
-impl<O: AsRef<str>, E: AsRef<str>, H, T: OnSummaryComplete> event_stream::EventHandler<O, E, H, T>
-    for MetricsState<T>
+impl<O: AsRef<str>, E: AsRef<str>, H, T: OnSummaryComplete> event_stream::EventHandler
+    for MetricsState<T, (O, E, H)>
 {
-    fn on_output(&mut self, event: O) {
+    type Output = O;
+    type Error = E;
+    type Handle = H;
+    type Token = T;
+
+    fn on_output(&mut self, event: Self::Output) {
         if let Some(ping) = fping::Ping::parse(&event) {
             if let Some(rtt) = ping.result {
                 let delta = self.calc_ipdv(ping.target, rtt);
@@ -131,8 +140,9 @@ impl<O: AsRef<str>, E: AsRef<str>, H, T: OnSummaryComplete> event_stream::EventH
         }
     }
 
-    fn on_error(&mut self, event: E) {
+    fn on_error(&mut self, event: Self::Error) {
         use fping::Control;
+
         match Control::parse(&event) {
             Control::TargetSummary(summary) => {
                 trace!(
@@ -157,7 +167,7 @@ impl<O: AsRef<str>, E: AsRef<str>, H, T: OnSummaryComplete> event_stream::EventH
         }
     }
 
-    fn on_control(&mut self, _: &mut H, token: T) -> io::Result<()> {
+    fn on_control(&mut self, _: &mut Self::Handle, token: Self::Token) -> io::Result<()> {
         self.held_token = Some(token);
         Ok(())
     }
@@ -210,7 +220,7 @@ async fn main() -> anyhow::Result<()> {
                 None => error!("failure registering signal handler")
             }
         },
-        res = fping.listen(LockControl::new(signal_to_interrupt::<_, String, String, Child,_>(nix::sys::signal::SIGQUIT, MetricsState::new()))) => {
+        res = fping.listen(LockControl::new(ControlToInterrupt::new(MetricsState::new(), nix::sys::signal::SIGQUIT))) => {
             // fping should be
             error!("fping listener terminated:\n{:#?}", res);
             res?;

@@ -6,12 +6,17 @@ use tokio::{
     sync::mpsc,
 };
 
-pub trait EventHandler<Out, Err, Handle: ?Sized, Token> {
-    fn on_output(&mut self, event: Out);
+pub trait EventHandler {
+    type Output;
+    type Error;
+    type Handle: ?Sized;
+    type Token;
 
-    fn on_error(&mut self, event: Err);
+    fn on_output(&mut self, event: Self::Output);
 
-    fn on_control(&mut self, handle: &mut Handle, token: Token) -> io::Result<()>;
+    fn on_error(&mut self, event: Self::Error);
+
+    fn on_control(&mut self, handle: &mut Self::Handle, token: Self::Token) -> io::Result<()>;
 }
 
 #[derive(Debug)]
@@ -56,7 +61,7 @@ impl<ES: EventStreamSource, T> PendingStream<ES, T> {
 
     pub async fn listen(
         &mut self,
-        mut handler: impl EventHandler<String, String, ES::Handle, T>,
+        mut handler: impl EventHandler<Output = String, Error = String, Handle = ES::Handle, Token = T>,
     ) -> io::Result<()> {
         async fn next_line<R>(lines: &mut Lines<R>) -> Option<io::Result<String>>
         where

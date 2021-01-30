@@ -37,32 +37,43 @@ pub mod signal {
         signal: S,
     }
 
-    pub fn apply<F, O, E, H, T>(signal: H::Signal, handler: F) -> ControlToInterrupt<F, H::Signal>
-    where
-        H: Interruptable,
-        F: EventHandler<O, E, H, T>,
-    {
-        ControlToInterrupt { handler, signal }
-    }
-
     #[derive(Debug)]
     pub struct Interrupted<T>(pub T);
 
-    impl<F, O, E, H, T> EventHandler<O, E, H, T> for ControlToInterrupt<F, H::Signal>
+    impl<F, H> ControlToInterrupt<F, H::Signal>
     where
-        H: Interruptable + std::fmt::Debug,
-        H::Signal: Copy + std::fmt::Debug,
-        F: EventHandler<O, E, H, Interrupted<T>>,
+        F: EventHandler<Handle = H>,
+        H: Interruptable,
     {
-        fn on_output(&mut self, event: O) {
+        pub fn new(handler: F, signal: H::Signal) -> Self {
+            Self { handler, signal }
+        }
+    }
+
+    impl<F, S, T> EventHandler for ControlToInterrupt<F, S>
+    where
+        F: EventHandler<Token = Interrupted<T>>,
+        S: Copy + std::fmt::Debug,
+        F::Handle: Interruptable<Signal = S> + std::fmt::Debug,
+    {
+        type Output = F::Output;
+        type Error = F::Error;
+        type Handle = F::Handle;
+        type Token = T;
+
+        fn on_output(&mut self, event: Self::Output) {
             self.handler.on_output(event)
         }
 
-        fn on_error(&mut self, event: E) {
+        fn on_error(&mut self, event: Self::Error) {
             self.handler.on_error(event)
         }
 
-        fn on_control(&mut self, handle: &mut H, token: T) -> io::Result<()> {
+        fn on_control(
+            &mut self,
+            handle: &mut Self::Handle,
+            token: Self::Token,
+        ) -> std::io::Result<()> {
             if handle.interrupt(self.signal)? {
                 self.handler.on_control(handle, Interrupted(token))
             } else {
@@ -101,19 +112,29 @@ pub mod lock {
         }
     }
 
-    impl<F, O, E, H, T: std::fmt::Debug> EventHandler<O, E, H, T> for LockControl<F>
+    impl<F, T> EventHandler for LockControl<F>
     where
-        F: EventHandler<O, E, H, (T, Claim)>,
+        F: EventHandler<Token = (T, Claim)>,
+        T: std::fmt::Debug,
     {
-        fn on_output(&mut self, event: O) {
+        type Output = F::Output;
+        type Error = F::Error;
+        type Handle = F::Handle;
+        type Token = T;
+
+        fn on_output(&mut self, event: Self::Output) {
             self.handler.on_output(event)
         }
 
-        fn on_error(&mut self, event: E) {
+        fn on_error(&mut self, event: Self::Error) {
             self.handler.on_error(event)
         }
 
-        fn on_control(&mut self, handle: &mut H, token: T) -> std::io::Result<()> {
+        fn on_control(
+            &mut self,
+            handle: &mut Self::Handle,
+            token: Self::Token,
+        ) -> std::io::Result<()> {
             if let Ok(lock) = self.lock.clone().try_lock_owned() {
                 self.handler
                     .on_control(handle, (token, Claim { inner: lock }))
