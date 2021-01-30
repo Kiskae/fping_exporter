@@ -15,12 +15,18 @@ use std::{collections::HashMap, convert::Infallible, env, io, time::Duration};
 use clap::crate_version;
 use prometheus::{labels, opts};
 use semver::VersionReq;
-use tokio::sync::oneshot;
+use tokio::{process::Child, sync::oneshot};
 
 mod args;
 mod event_stream;
 mod fping;
 mod http;
+mod util;
+
+use crate::util::{
+    lock::{Claim, LockControl},
+    signal::{apply as signal_to_interrupt, Interrupted},
+};
 //mod metrics;
 //mod sync;
 
@@ -90,14 +96,18 @@ trait OnSummaryComplete {
     fn on_completed(self);
 }
 
+// Either signals are completely disabled
 impl OnSummaryComplete for Infallible {
     fn on_completed(self) {}
 }
 
-impl OnSummaryComplete for oneshot::Sender<()> {
+// Or we have exclusive access that has then been successfully applied as
+// an interrupt.
+impl OnSummaryComplete for Interrupted<(oneshot::Sender<Claim>, Claim)> {
     fn on_completed(self) {
         // The receiver might be gone, this is fine
-        let _ = self.send(());
+        let Interrupted((tx, claim)) = self;
+        let _ = tx.send(claim);
     }
 }
 
@@ -182,7 +192,7 @@ async fn main() -> anyhow::Result<()> {
         .matches(&args.fping_version)
     {
         info!("SIGQUIT signal summary enabled");
-        http::RegistryAccess::<()>::new(prometheus::default_registry(), Some(1))
+        http::RegistryAccess::new(prometheus::default_registry(), Some(1))
     } else {
         warn!(
             "fping {} does not support summary requests, accurate packet loss will not be available",
@@ -200,7 +210,7 @@ async fn main() -> anyhow::Result<()> {
                 None => error!("failure registering signal handler")
             }
         },
-        res = fping.listen(MetricsState::new()) => {
+        res = fping.listen(LockControl::new(signal_to_interrupt::<_, String, String, Child,_>(nix::sys::signal::SIGQUIT, MetricsState::new()))) => {
             // fping should be
             error!("fping listener terminated:\n{:#?}", res);
             res?;
@@ -219,7 +229,13 @@ async fn main() -> anyhow::Result<()> {
         Some(status) => error!("{:?}", status),
         // Exit not caused by unexpected fping exit, clean up the child process
         //TODO: fping uses SIGINT as kill signal, .kill() defaults to SIGKILL
-        None => handle.kill().await?,
+        None => {
+            use crate::util::signal::Interruptable;
+
+            // Send SIGINT and clean up
+            handle.interrupt(nix::sys::signal::SIGINT)?;
+            handle.wait().await?;
+        }
     }
 
     Ok(())
