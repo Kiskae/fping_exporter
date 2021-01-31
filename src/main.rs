@@ -27,7 +27,7 @@ mod util;
 
 use crate::util::{
     lock::{Claim, LockControl},
-    signal::{ControlToInterrupt, Interrupted},
+    signal::{ControlToInterrupt, Interruptable, Interrupted, KnownSignals},
     NoPrelaunchControl,
 };
 
@@ -255,7 +255,7 @@ async fn main() -> anyhow::Result<()> {
             LockControl::new(
                 ControlToInterrupt::new(
                     MetricsState::new(),
-                    nix::sys::signal::SIGQUIT
+                    nix::sys::signal::Signal::sigquit()
                 )
             )
         )) => {
@@ -278,10 +278,11 @@ async fn main() -> anyhow::Result<()> {
         // Exit not caused by unexpected fping exit, clean up the child process
         //TODO: fping uses SIGINT as kill signal, .kill() defaults to SIGKILL
         None => {
-            use crate::util::signal::Interruptable;
-
+            fn do_sigint<H: Interruptable>(handle: &mut H) -> io::Result<bool> {
+                handle.interrupt(H::Signal::sigint())
+            }
             // Send SIGINT and clean up
-            handle.interrupt(nix::sys::signal::SIGINT)?;
+            do_sigint(&mut handle)?;
             handle.wait().await?;
         }
     }

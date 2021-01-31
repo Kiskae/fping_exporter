@@ -47,8 +47,18 @@ pub mod signal {
 
     use crate::event_stream::EventHandler;
 
-    pub trait Interruptable {
-        type Signal;
+    pub trait KnownSignals: Sized {
+        fn sigquit() -> Self {
+            panic!("SIGQUIT not available")
+        }
+
+        fn sigint() -> Self {
+            panic!("SIGINT not available")
+        }
+    }
+
+    pub trait Interruptable: Sized {
+        type Signal: KnownSignals;
 
         fn interrupt(&mut self, signal: Self::Signal) -> io::Result<bool>;
     }
@@ -76,6 +86,17 @@ pub mod signal {
         }
     }
 
+    #[cfg(unix)]
+    impl KnownSignals for nix::sys::signal::Signal {
+        fn sigquit() -> Self {
+            Self::SIGQUIT
+        }
+
+        fn sigint() -> Self {
+            Self::SIGINT
+        }
+    }
+
     pub struct ControlToInterrupt<F, S> {
         handler: F,
         signal: S,
@@ -84,7 +105,7 @@ pub mod signal {
     #[derive(Debug)]
     pub struct Interrupted<T>(pub T);
 
-    impl<F, H> ControlToInterrupt<F, H::Signal>
+    impl<F, H: ?Sized> ControlToInterrupt<F, H::Signal>
     where
         F: EventHandler<Handle = H>,
         H: Interruptable,
