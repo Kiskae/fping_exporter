@@ -1,3 +1,47 @@
+use event_stream::EventHandler;
+
+use crate::event_stream;
+
+pub struct NoPrelaunchControl<F> {
+    handler: F,
+    initialized: bool,
+}
+
+impl<F> NoPrelaunchControl<F> {
+    pub fn new(handler: F) -> Self {
+        NoPrelaunchControl {
+            handler,
+            initialized: false,
+        }
+    }
+}
+
+impl<F: EventHandler> EventHandler for NoPrelaunchControl<F> {
+    type Output = F::Output;
+    type Error = F::Error;
+    type Handle = F::Handle;
+    type Token = F::Token;
+
+    fn on_output(&mut self, event: Self::Output) {
+        self.initialized = true;
+        self.handler.on_output(event);
+    }
+
+    fn on_error(&mut self, event: Self::Error) {
+        self.initialized = true;
+        self.handler.on_error(event);
+    }
+
+    fn on_control(&mut self, handle: &mut Self::Handle, token: Self::Token) -> std::io::Result<()> {
+        if self.initialized {
+            self.handler.on_control(handle, token)
+        } else {
+            trace!("dropping prelaunch control token");
+            Ok(())
+        }
+    }
+}
+
 pub mod signal {
     use std::io;
 

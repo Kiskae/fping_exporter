@@ -28,6 +28,7 @@ mod util;
 use crate::util::{
     lock::{Claim, LockControl},
     signal::{ControlToInterrupt, Interrupted},
+    NoPrelaunchControl,
 };
 
 #[cfg(all(feature = "docker", unix))]
@@ -177,7 +178,7 @@ impl<O: AsRef<str>, E: AsRef<str>, H, T: OnSummaryComplete> event_stream::EventH
                 );
                 if self.current_targets == self.expected_targets {
                     if let Some(token) = self.held_token.take() {
-                    token.on_completed();
+                        token.on_completed();
                     } else {
                         warn!("summary received, but no token held")
                     }
@@ -250,8 +251,15 @@ async fn main() -> anyhow::Result<()> {
                 None => error!("failure registering signal handler")
             }
         },
-        res = fping.listen(LockControl::new(ControlToInterrupt::new(MetricsState::new(), nix::sys::signal::SIGQUIT))) => {
-            // fping should be
+        res = fping.listen(NoPrelaunchControl::new(
+            LockControl::new(
+                ControlToInterrupt::new(
+                    MetricsState::new(&mut last_err),
+                    nix::sys::signal::SIGQUIT
+                )
+            )
+        )) => {
+            // fping should be in a permanent loop
             error!("fping listener terminated:\n{:#?}", res);
             res?;
         },
