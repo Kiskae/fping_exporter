@@ -1,8 +1,8 @@
-use std::convert::Infallible;
+use std::{convert::Infallible, time::Duration};
 
 use prometheus::{proto::MetricFamily, Encoder, Registry, TextEncoder};
 use tokio::sync::{mpsc, oneshot};
-use warp::{reply::with_header, Rejection, Reply};
+use warp::{reply::with_header, Filter, Rejection, Reply};
 
 use crate::args::MetricArgs;
 
@@ -76,7 +76,17 @@ pub async fn publish_metrics<T: Send + 'static>(
     args: &MetricArgs,
     reg: RegistryAccess<T>,
 ) -> Result<(), warp::Error> {
-    use warp::Filter;
+    let mut count = 0;
+    loop {
+        count += 1;
+        let reg = reg.clone();
+        trace!("warming up round {}", count);
+        if let Ok(_) = reg.gather().await {
+            break;
+        } else {
+            tokio::time::sleep(Duration::from_millis(150)).await;
+        }
+    }
 
     let handler = move || {
         let reg = reg.clone();
