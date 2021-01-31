@@ -254,7 +254,7 @@ async fn main() -> anyhow::Result<()> {
         res = fping.listen(NoPrelaunchControl::new(
             LockControl::new(
                 ControlToInterrupt::new(
-                    MetricsState::new(&mut last_err),
+                    MetricsState::new(),
                     nix::sys::signal::SIGQUIT
                 )
             )
