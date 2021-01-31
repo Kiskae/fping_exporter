@@ -81,7 +81,7 @@ pub async fn publish_metrics<T: Send + 'static>(
         count += 1;
         let reg = reg.clone();
         trace!("warming up round {}", count);
-        if let Ok(_) = reg.gather().await {
+        if reg.gather().await.is_ok() {
             break;
         } else {
             tokio::time::sleep(Duration::from_millis(150)).await;
