@@ -18,13 +18,13 @@ impl<'y> Ping<&'y str> {
         lazy_static! {
             static ref FPING_LINE: Regex = Regex::new(
                 r"(?x)
-                    ^\[(?P<ts>[^\]]+)\]          # [1607718717.47230] 
+                    ^\[(?P<ts>[^\]]+)\]          # [1607718717.47230]
                     \s(?P<id>.+?)                # dns.google
                     \s\((?P<addr>[^\)]+)\)\s+:   # (8.8.8.8)                       :
-                    \s\[(?P<seq>\d+)\],          # [0], 
+                    \s\[(?P<seq>\d+)\],          # [0],
                     \s(?:
-                        timed|                   # timed out 
-                        \d+\sbytes,\s(?P<rtt>    # 64 bytes, 
+                        timed|                   # timed out
+                        \d+\sbytes,\s(?P<rtt>    # 64 bytes,
                             [^\s]+               # 18.3 ms || 283 ms
                         )\s ms
                     )
@@ -139,7 +139,7 @@ impl<'t> Control<&'t str> {
                 r"(?x)
                 ^(?P<target>.+?)             # dns.google
                 \ \((?P<addr>[^\)]+)\)\s+:   # (8.8.8.8)                       :
-                \ [^\s]+\ =                  # xmt/rcv/%loss = 
+                \ [^\s]+\ =                  # xmt/rcv/%loss =
                 \ (?P<xmt>\d+)               # 1
                 /(?P<rcv>\d+)                # /1
                 .*$                          # /0%, min/avg/max = 16.3/16.3/16.3

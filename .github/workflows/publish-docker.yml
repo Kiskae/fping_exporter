@@ -16,7 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        target: 
+        target:
           - x86_64-unknown-linux-musl
           - i686-unknown-linux-musl
           - armv7-unknown-linux-musleabihf
@@ -97,4 +97,3 @@ jobs:
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.docker_meta.outputs.tags }}
           labels: ${{ steps.docker_meta.outputs.labels }}
-
