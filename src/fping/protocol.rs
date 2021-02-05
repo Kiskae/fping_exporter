@@ -204,7 +204,7 @@ mod tests {
             })
         );
 
-        //assert!(Ping::parse("raw").is_some());
+        assert_eq!(Ping::parse(""), None);
     }
 
     #[test]
@@ -218,7 +218,7 @@ mod tests {
             ipv6.google.com (2a00:1450:400e:806::200e) : xmt/rcv/%loss = 104/0/100%\n\
             ns1.webtraf.com.au (103.224.162.40) : xmt/rcv/%loss = 104/104/0%, min/avg/max = 338/346/461"
             .split('\n'),
-            |line| Control::parse(line),
+            Control::parse,
         ), &[
             Control::BlankLine,
             Control::SummaryLocalTime,

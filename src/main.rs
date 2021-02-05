@@ -11,10 +11,16 @@ extern crate log;
 extern crate clap;
 
 use std::{
-    collections::HashMap, convert::Infallible, env, io, marker::PhantomData, time::Duration,
+    collections::HashMap,
+    convert::Infallible,
+    env, io,
+    marker::PhantomData,
+    sync::{Arc, Mutex},
+    time::Duration,
 };
 
 use clap::crate_version;
+use prom::{LockedCollector, PingMetrics};
 use prometheus::{labels, opts};
 use semver::VersionReq;
 use tokio::sync::oneshot;
@@ -23,6 +29,7 @@ mod args;
 mod event_stream;
 mod fping;
 mod http;
+mod prom;
 mod util;
 
 use crate::util::{
@@ -66,16 +73,18 @@ struct MetricsState<T, P> {
     expected_targets: u32,
     current_targets: u32,
     held_token: Option<T>,
+    metrics: Arc<Mutex<PingMetrics>>,
     _marker: PhantomData<P>,
 }
 
 impl<T, P> MetricsState<T, P> {
-    fn new() -> Self {
+    fn new(metrics: Arc<Mutex<PingMetrics>>) -> Self {
         Self {
             last_result: HashMap::default(),
             expected_targets: 1,
             current_targets: 0,
             held_token: None,
+            metrics,
             _marker: PhantomData,
         }
     }
@@ -136,16 +145,18 @@ impl<O: AsRef<str>, E: AsRef<str>, H, T: OnSummaryComplete> event_stream::EventH
 
     fn on_output(&mut self, event: Self::Output) {
         if let Some(ping) = fping::Ping::parse(&event) {
-            if let Some(rtt) = ping.result {
+            let labels = ping.labels();
+            let delta = if let Some(rtt) = ping.result {
                 let delta = self.calc_ipdv(ping.target, rtt);
 
-                //TODO: record ping
-                trace!("rtt {:?} on {:?}", ping.result, ping.labels());
-                //TODO: record delta
-                trace!("ipvd {:?} on {:?}", delta, ping.labels());
+                trace!("rtt {:?} on {:?}", ping.result, labels);
+                trace!("ipvd {:?} on {:?}", delta, labels);
+                delta
             } else {
-                trace!("timeout on {:?}", ping.labels());
-            }
+                trace!("timeout on {:?}", labels);
+                None
+            };
+            self.metrics.lock().unwrap().ping(ping, delta);
         } else {
             error!("unhandled stdout: {}", event.as_ref());
         }
@@ -169,7 +180,7 @@ impl<O: AsRef<str>, E: AsRef<str>, H, T: OnSummaryComplete> event_stream::EventH
                     summary.sent,
                     summary.labels()
                 );
-                //TODO: record sent/received
+                self.metrics.lock().unwrap().summary(summary);
                 self.current_targets += 1;
                 trace!(
                     "{} out of {} targets summarized",
@@ -193,7 +204,13 @@ impl<O: AsRef<str>, E: AsRef<str>, H, T: OnSummaryComplete> event_stream::EventH
                 self.expected_targets = std::cmp::max(self.expected_targets, self.current_targets);
                 self.current_targets = 0;
             }
-            e => trace!("unhandled stderr:\n{:#?}", e),
+            Control::Unhandled(err) => {
+                debug!("unexpected stderr:\n{}", err);
+            }
+            e => {
+                trace!("ignored output: {:?}", e);
+                self.metrics.lock().unwrap().error(e);
+            }
         }
     }
 
@@ -226,6 +243,8 @@ async fn main() -> anyhow::Result<()> {
     let launcher = fping::for_program(&fping_binary);
     let args = args::load_args(&launcher, discovery_timeout()).await?;
 
+    let metrics = prom::PingMetrics::new("fping");
+    prometheus::register(Box::new(LockedCollector::from(metrics.clone())))?;
     prometheus::register(info_metric(args.fping_version.clone()))?;
 
     let (http_tx, rx) = if VersionReq::parse(">=4.3.0")
@@ -254,8 +273,8 @@ async fn main() -> anyhow::Result<()> {
         res = fping.listen(NoPrelaunchControl::new(
             LockControl::new(
                 ControlToInterrupt::new(
-                    MetricsState::new(),
-                    nix::sys::signal::Signal::sigquit()
+                    MetricsState::new(metrics),
+                    KnownSignals::sigquit()
                 )
             )
         )) => {
@@ -276,13 +295,9 @@ async fn main() -> anyhow::Result<()> {
         //TODO: check for unhandled stderr output for reason?
         Some(status) => error!("{:?}", status),
         // Exit not caused by unexpected fping exit, clean up the child process
-        //TODO: fping uses SIGINT as kill signal, .kill() defaults to SIGKILL
         None => {
-            fn do_sigint<H: Interruptable>(handle: &mut H) -> io::Result<bool> {
-                handle.interrupt(H::Signal::sigint())
-            }
             // Send SIGINT and clean up
-            do_sigint(&mut handle)?;
+            handle.interrupt(KnownSignals::sigint())?;
             handle.wait().await?;
         }
     }
