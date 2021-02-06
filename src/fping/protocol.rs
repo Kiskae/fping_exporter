@@ -34,11 +34,15 @@ impl<'y> Ping<&'y str> {
             .unwrap();
         }
 
-        fn millis_to_duration(time: f64) -> Duration {
+        fn millis_to_duration(time: f64) -> Option<Duration> {
             lazy_static! {
                 static ref MILLISECOND: Duration = Duration::from_millis(1);
             }
-            MILLISECOND.mul_f64(time)
+            if time < 0.0 {
+                None
+            } else {
+                Some(MILLISECOND.mul_f64(time))
+            }
         }
 
         let caps = FPING_LINE.captures(raw.as_ref())?;
@@ -47,8 +51,10 @@ impl<'y> Ping<&'y str> {
                 .name("ts")?
                 .as_str()
                 .parse()
-                .map(Duration::from_secs_f64)
-                .ok()?,
+                .ok()
+                // negative numbers would cause from_secs_f64 to panic
+                .filter(|ms| *ms >= 0.0)
+                .map(Duration::from_secs_f64)?,
             target: caps.name("id")?.as_str(),
             addr: caps.name("addr")?.as_str(),
             seq: caps.name("seq")?.as_str().parse().ok()?,
@@ -56,7 +62,7 @@ impl<'y> Ping<&'y str> {
                 .name("rtt")
                 .map_or_else(
                     || Ok(None),
-                    |rtt| rtt.as_str().parse().map(millis_to_duration).map(Some),
+                    |rtt| rtt.as_str().parse().map(millis_to_duration),
                 )
                 .ok()?,
         })
