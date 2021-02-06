@@ -58,13 +58,16 @@ impl<'y> Ping<&'y str> {
             target: caps.name("id")?.as_str(),
             addr: caps.name("addr")?.as_str(),
             seq: caps.name("seq")?.as_str().parse().ok()?,
-            result: caps
-                .name("rtt")
-                .map_or_else(
-                    || Ok(None),
-                    |rtt| rtt.as_str().parse().map(millis_to_duration),
-                )
-                .ok()?,
+            result: caps.name("rtt").map_or_else(
+                || Some(None),
+                |rtt| {
+                    rtt.as_str()
+                        .parse()
+                        .ok()
+                        .and_then(millis_to_duration)
+                        .map(Some)
+                },
+            )?,
         })
     }
 }
