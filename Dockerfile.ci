@@ -3,9 +3,12 @@ ARG FPING_VERSION="5.0"
 # Compile the latest version of fping
 FROM buildpack-deps:buster as fping_builder
 WORKDIR /usr/src/fping
+RUN apt-get update && apt-get install -y \
+  musl-tools \
+  && rm -rf /var/lib/apt/lists/*
 ARG FPING_VERSION
 RUN curl https://fping.org/dist/fping-${FPING_VERSION}.tar.gz | tar -xz --strip-components=1
-RUN ./configure && make && make install
+RUN CC=musl-gcc ./configure LDFLAGS=-static && make && make install
 
 FROM busybox as selector
 WORKDIR /app
@@ -26,9 +29,7 @@ chmod +x selected/fping_exporter
 # make sure the binary is functional
 RUN selected/fping_exporter --version
 
-FROM debian:stable-slim
-# netbase provides the required '/etc/protocols'
-RUN apt-get update && apt-get install -y netbase && rm -rf /var/lib/apt/lists/*
+FROM scratch
 COPY --from=selector /app/selected/fping_exporter /bin/
 COPY --from=fping_builder /usr/local/sbin/fping /bin/
 ENV FPING_BIN=/bin/fping
