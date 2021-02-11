@@ -9,9 +9,7 @@ use crate::fping::{Control, Ping, SentReceivedSummary, LABEL_NAMES};
 
 #[derive(Debug)]
 pub struct PingMetrics {
-    // rtt as reported by fping
     round_trip_time: HistogramVec,
-    // ping jitter
     packet_delay_variation: HistogramVec,
     ping_sent: IntCounterVec,
     ping_received: IntCounterVec,
@@ -27,32 +25,46 @@ impl PingMetrics {
     fn create<S: Into<String> + Copy>(namespace: S) -> Self {
         Self {
             round_trip_time: HistogramVec::new(
-                histogram_opts!("rtt_seconds", "help", vec![f64::INFINITY]).namespace(namespace),
+                histogram_opts!(
+                    "icmp_round_trip_time_seconds",
+                    "icmp echo round-trip time as reported by fping",
+                    vec![f64::INFINITY]
+                )
+                .namespace(namespace),
                 &LABEL_NAMES,
             )
             .unwrap(),
             packet_delay_variation: HistogramVec::new(
-                histogram_opts!("ipdv_seconds", "help", vec![f64::INFINITY]).namespace(namespace),
+                histogram_opts!(
+                    "instantaneous_packet_delay_variation_seconds",
+                    "packet delay variation between two successive icmp responses",
+                    vec![f64::INFINITY]
+                )
+                .namespace(namespace),
                 &LABEL_NAMES,
             )
             .unwrap(),
             ping_sent: IntCounterVec::new(
-                opts!("ping_sent_total", "help").namespace(namespace),
+                opts!("icmp_request_total", "ICMP ECHO REQUEST sent").namespace(namespace),
                 &LABEL_NAMES,
             )
             .unwrap(),
             ping_received: IntCounterVec::new(
-                opts!("ping_received_total", "help").namespace(namespace),
+                opts!("icmp_reply_total", "ICMP ECHO REPLY received").namespace(namespace),
                 &LABEL_NAMES,
             )
             .unwrap(),
             ping_errors: IntCounterVec::new(
-                opts!("ping_errors_total", "help").namespace(namespace),
+                opts!("errors_total", "count of errors reported by fping").namespace(namespace),
                 &["target", "type"],
             )
             .unwrap(),
             last_observed_seq: IntGaugeVec::new(
-                opts!("last_observed_sequence", "help").namespace(namespace),
+                opts!(
+                    "last_observed_sequence",
+                    "last ICMP sequence number returned by fping"
+                )
+                .namespace(namespace),
                 &LABEL_NAMES,
             )
             .unwrap(),
