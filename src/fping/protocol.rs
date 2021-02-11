@@ -6,7 +6,7 @@ pub const LABEL_NAMES: [&str; 2] = ["target", "addr"];
 
 #[derive(Debug, PartialEq)]
 pub struct Ping<S> {
-    pub timestamp: Duration,
+    pub timestamp: S,
     pub target: S,
     pub addr: S,
     pub seq: u64,
@@ -47,14 +47,7 @@ impl<'y> Ping<&'y str> {
 
         let caps = FPING_LINE.captures(raw.as_ref())?;
         Some(Ping {
-            timestamp: caps
-                .name("ts")?
-                .as_str()
-                .parse()
-                .ok()
-                // negative numbers would cause from_secs_f64 to panic
-                .filter(|ms| *ms >= 0.0)
-                .map(Duration::from_secs_f64)?,
+            timestamp: caps.name("ts")?.as_str(),
             target: caps.name("id")?.as_str(),
             addr: caps.name("addr")?.as_str(),
             seq: caps.name("seq")?.as_str().parse().ok()?,
@@ -205,15 +198,13 @@ mod tests {
         assert_eq!(
             Ping::parse("[1611765997.71135] localhost (127.0.0.1) : [9], 64 bytes, 0.029 ms (0.040 avg, 0% loss)"),
             Some(Ping {
-                timestamp: Duration::from_secs_f64("1611765997.71135".parse().unwrap()),
+                timestamp: "1611765997.71135",
                 target: "localhost",
                 addr: "127.0.0.1",
                 seq: 9,
                 result: Some(Duration::from_micros(29)),
             })
         );
-
-        assert_eq!(Ping::parse(""), None);
     }
 
     #[test]
