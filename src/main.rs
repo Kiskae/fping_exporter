@@ -28,7 +28,6 @@ use tokio::sync::oneshot;
 mod args;
 mod event_stream;
 mod fping;
-mod http;
 mod prom;
 mod util;
 
@@ -252,13 +251,13 @@ async fn main() -> anyhow::Result<()> {
         .matches(&args.fping_version)
     {
         info!("SIGQUIT signal summary enabled");
-        http::RegistryAccess::new(prometheus::default_registry(), Some(1))
+        prom::RegistryAccess::new(prometheus::default_registry(), Some(1))
     } else {
         warn!(
             "fping {} does not support summary requests, accurate packet loss will not be available",
             args.fping_version
         );
-        http::RegistryAccess::new(prometheus::default_registry(), None)
+        prom::RegistryAccess::new(prometheus::default_registry(), None)
     };
 
     let mut fping = launcher.spawn(&args.targets).await?.with_controls(rx);
@@ -282,7 +281,7 @@ async fn main() -> anyhow::Result<()> {
             error!("fping listener terminated:\n{:#?}", res);
             res?;
         },
-        res = http::publish_metrics(&args.metrics, http_tx) => {
+        res = prom::publish_metrics(&args.metrics, http_tx) => {
             debug!("http handler terminated:\n{:#?}", res);
             res?;
         }

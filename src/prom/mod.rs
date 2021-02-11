@@ -1,5 +1,7 @@
+mod http;
 mod metrics;
 
+pub use http::{publish_metrics, RegistryAccess};
 pub use metrics::PingMetrics;
 use prometheus::core::{Collector, Desc};
 use std::sync::{Arc, Mutex};
