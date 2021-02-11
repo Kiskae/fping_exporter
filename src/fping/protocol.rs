@@ -217,6 +217,11 @@ mod tests {
     }
 
     #[test]
+    fn reject_native_rtt() {
+        assert_eq!(Ping::parse("[1611765997.71135] localhost (127.0.0.1) : [9], 64 bytes, -7.4 ms (0.040 avg, 0% loss)"), None);
+    }
+
+    #[test]
     fn parse_signal_summary() {
         assert_eq!(parse_lines(
             "\n\
