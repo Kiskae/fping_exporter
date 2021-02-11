@@ -19,10 +19,10 @@ pub struct PingMetrics {
 
 impl PingMetrics {
     pub fn new<S: Into<String> + Copy>(namespace: S) -> Arc<Mutex<Self>> {
-        Arc::new(Mutex::new(Self::create(namespace)))
+        Arc::new(Mutex::new(Self::internal_new(namespace)))
     }
 
-    fn create<S: Into<String> + Copy>(namespace: S) -> Self {
+    fn internal_new<S: Into<String> + Copy>(namespace: S) -> Self {
         Self {
             round_trip_time: HistogramVec::new(
                 histogram_opts!(

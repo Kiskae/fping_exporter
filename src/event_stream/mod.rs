@@ -1,5 +1,7 @@
 use std::{future, io};
 
+pub mod util;
+
 use tokio::{
     io::{AsyncRead, BufReader, Lines},
     process::Child,

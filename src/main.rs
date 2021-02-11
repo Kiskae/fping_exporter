@@ -29,9 +29,8 @@ mod args;
 mod event_stream;
 mod fping;
 mod prom;
-mod util;
 
-use crate::util::{
+use crate::event_stream::util::{
     lock::{Claim, LockControl},
     signal::{ControlToInterrupt, Interruptable, Interrupted, KnownSignals},
     NoPrelaunchControl,
