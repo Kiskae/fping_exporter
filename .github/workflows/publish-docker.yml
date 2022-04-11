@@ -43,7 +43,7 @@ jobs:
           use-cross: true
           command: build
           args: --release --verbose --features "docker" --target ${{ matrix.target }}
-      - uses: actions/upload-artifact@v2
+      - uses: actions/upload-artifact@v3
         with:
           name: ${{ matrix.target }}
           path: target/${{ matrix.target }}/release/fping_exporter*
