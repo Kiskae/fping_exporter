@@ -58,7 +58,7 @@ jobs:
         with:
           path: artifacts
       - id: docker_meta
-        uses: docker/metadata-action@v4
+        uses: docker/metadata-action@v5
         with:
           images: kiskae/fping_exporter,ghcr.io/kiskae/fping_exporter
           tags: |
