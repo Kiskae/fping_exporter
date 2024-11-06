@@ -33,7 +33,7 @@ pub enum VersionError {
     BinaryNotFound,
     #[error("libc failure, required file /etc/protocols missing")]
     DependenciesMissing,
-    #[error("unknown fping exit code: {:?}\n{1}", .0.code())]
+    #[error("unknown fping exit code: {:?}\n{}", .0.code(), .1)]
     ProcessFailure(ExitStatus, String),
     #[error("unknown io failure")]
     Other(#[source] io::Error),
