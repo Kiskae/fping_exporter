@@ -9,7 +9,7 @@ docker = []
 [dependencies]
 anyhow = "1"
 clap = "2.34"
-humantime = "2.2"
+humantime = "2.3"
 lazy_static = "1.5"
 log = {version = "0.4", features = ["release_max_level_info"]}
 nix = "0.21"
