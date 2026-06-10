@@ -19,4 +19,4 @@ regex = "1"
 semver = "1.0"
 thiserror = "2"
 tokio = {version = "1", features = ["full"]}
-warp = "0.3"
+warp = "0.4"
